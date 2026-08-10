@@ -45,6 +45,13 @@ POOLER_REGIONS = (
     "sa-east-1",
     "us-east-2",
     "ca-central-1",
+    "eu-west-2",
+    "eu-west-3",
+    "eu-north-1",
+    "ap-south-1",
+    "ap-southeast-2",
+    "ap-northeast-2",
+    "us-central-1",
 )
 ALLOWED_STATUSES = {
     "DRAFT",
@@ -147,17 +154,19 @@ def _supabase_db_candidates() -> list[str]:
         project_ref = os.getenv("SUPABASE_URL", "").split("//")[-1].split(".")[0]
     if not project_ref:
         return [SUPABASE_DB_URL]
-    pooler_user = parsed.username if parsed.username.startswith("postgres.") else f"postgres.{project_ref}"
     password = quote(parsed.password, safe="")
     database = parsed.path or "/postgres"
     query = parsed.query or "sslmode=require"
     candidates = [SUPABASE_DB_URL]
-    for region in POOLER_REGIONS:
-        for port in (6543, 5432):
-            candidates.append(
-                f"postgresql://{quote(pooler_user, safe='')}:"
-                f"{password}@aws-0-{region}.pooler.supabase.com:{port}{database}?{query}"
-            )
+    usernames = list(dict.fromkeys((parsed.username, "postgres", f"postgres.{project_ref}")))
+    for prefix in ("aws-0", "aws-1"):
+        for region in POOLER_REGIONS:
+            for username in usernames:
+                for port in (6543, 5432):
+                    candidates.append(
+                        f"postgresql://{quote(username, safe='')}:"
+                        f"{password}@{prefix}-{region}.pooler.supabase.com:{port}{database}?{query}"
+                    )
     return candidates
 
 
