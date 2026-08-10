@@ -28,5 +28,6 @@ Phoenix AI TikTok Autopilot is a web-based automation platform that allows users
 | Database | Supabase PostgreSQL |
 | Storage | Supabase Storage |
 | AI | Phoenix AI Router (Claude Opus 5, GPT-5.6-SOL) |
+| Web Search | Tavily (primary), DuckDuckGo Instant Answer API and Serper.dev (backups) |
 | Video | FFmpeg |
 | Publishing | TikTok Content Posting API |

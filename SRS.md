@@ -440,6 +440,57 @@ Safety
 
 ---
 
+2.6a Web Search Integration
+
+To keep content accurate, current, and well-researched, the system shall use external web search services to gather real-world information during topic research and content generation.
+
+Primary web search: Tavily
+
+The primary web search provider shall be Tavily (https://app.tavily.com).
+
+Tavily provides accurate, up-to-date search results optimized for AI agents, returning extracted and ranked content from reliable sources.
+
+Backup 1 — DuckDuckGo Instant Answer API
+
+If Tavily is unavailable or its quota is exhausted, the system shall fall back to the DuckDuckGo Instant Answer API (https://api.duckduckgo.com), which requires no API key, is privacy-focused, and supports approximately 60 requests per minute. It returns structured JSON with abstracts, definitions, related topics, and images from over 100 sources.
+
+Example integration:
+
+import requests
+
+def duckduckgo_search(query):
+    url = f"https://api.duckduckgo.com/?q={query}&format=json&no_html=1&skip_disambig=1"
+    response = requests.get(url)
+    return response.json()
+
+result = duckduckgo_search("latest AI advancements")
+print(result.get('AbstractText', 'No abstract available'))
+
+
+Backup 2 — Serper.dev
+
+If both primary and first backup are unavailable, the system shall fall back to Serper (https://serper.dev), a Google-search-based API providing fast, structured search results for agents.
+
+Search Provider Architecture
+
+Search Manager
+
+├── Tavily (primary)
+├── DuckDuckGo Instant Answer API (backup 1, no API key, ~60 req/min)
+└── Serper.dev (backup 2)
+
+
+Search usage rules
+
+Search calls must never assume that a provider's quota resets daily; provider-specific reset information should be configurable.
+
+Search results shall be recorded in usage monitoring alongside AI and TTS usage.
+
+The content director shall cite or reflect search findings in generated scripts to improve factual accuracy.
+
+
+---
+
 2.7 AI Content Director
 
 The AI shall not simply generate a script.
