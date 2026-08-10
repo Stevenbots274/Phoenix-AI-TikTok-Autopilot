@@ -1,0 +1,2 @@
+# The MVP intentionally uses Python's standard library only.
+# Optional integrations can be added without changing the application boundary.
