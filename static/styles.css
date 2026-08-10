@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 :root { --ink:#171a21; --muted:#7d8494; --line:#e7e8ec; --paper:#f7f7f5; --white:#fff; --orange:#f26d4f; --orange-dark:#d85236; --purple:#665df5; --green:#25a776; }
+.brand-mark-image { width:32px; height:32px; }
 * { box-sizing:border-box; }
 body { margin:0; color:var(--ink); background:var(--paper); font-family:Manrope,system-ui,sans-serif; font-size:14px; }
 button,input,textarea,select { font:inherit; }

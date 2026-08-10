@@ -21,7 +21,7 @@ Phoenix AI TikTok Autopilot is a web-based automation platform that allows users
 
 ## Run Locally
 
-The MVP uses Python's standard library and SQLite, so no package installation is required.
+The app uses Python and Supabase PostgreSQL. Render installs the single database driver from `requirements.txt` during deployment.
 
 ```bash
 python3 server.py
@@ -43,10 +43,9 @@ Passwords are stored as salted scrypt hashes. Sessions use HttpOnly cookies, and
 
 - Dashboard with automation status, queue counts, recent content, and system health
 - Content Studio for AI-directed structured content plans
-- Local deterministic fallback when the Phoenix AI Router is not configured
-- Phoenix AI Router adapter with model fallback-ready configuration
+- Phoenix AI Router adapter with primary and fallback model configuration
 - Tavily, DuckDuckGo, and Serper search adapter chain
-- SQLite schema for profiles, settings, content, scripts, videos, schedules, notifications, usage, and logs
+- Supabase PostgreSQL schema for profiles, settings, content, scripts, videos, schedules, notifications, usage, and logs
 - Approval and automatic automation modes with scheduling records
 - FFmpeg/TTS media boundary with 1080x1920 MP4 validation and clear setup status
 - TikTok OAuth and Content Posting API boundary with backend-only token storage and a creator-settings check before posting
@@ -67,8 +66,8 @@ The publishing boundary expects a publicly reachable rendered video URL. Actual 
 
 | Component | Technology |
 |-----------|------------|
-| Frontend / App | HTML, CSS, JavaScript, Python standard library |
-| Database | SQLite (MVP boundary ready for PostgreSQL) |
+| Frontend / App | HTML, CSS, JavaScript, Python |
+| Database | Supabase PostgreSQL |
 | Storage | Local/Render storage boundary |
 | AI | Phoenix AI Router (Claude Opus 5, GPT-5.6-SOL) |
 | Web Search | Tavily (primary), DuckDuckGo Instant Answer API and Serper.dev (backups) |

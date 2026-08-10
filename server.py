@@ -1,9 +1,8 @@
-"""Phoenix Autopilot MVP server.
+"""Phoenix Autopilot server.
 
 Run with: python3 server.py
-The server uses SQLite and the Python standard library so the first run has no
-package installation step. Provider credentials are read only from the process
-environment and are never returned by the API.
+The server uses Supabase PostgreSQL. Provider credentials are read only from
+the process environment and are never returned by the API.
 """
 
 from __future__ import annotations
@@ -14,7 +13,6 @@ import hashlib
 import hmac
 import os
 import secrets
-import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
@@ -23,7 +21,10 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from content_director import ContentDirector
+import psycopg
+from psycopg.rows import dict_row
+
+from content_director import ContentDirector, ContentProviderError
 from media_engine import MediaEngine
 from search_manager import SearchManager, serialise_results
 from tiktok import TikTokClient, TikTokConfigurationError
@@ -31,7 +32,7 @@ from tiktok import TikTokClient, TikTokConfigurationError
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
-DB_PATH = Path(os.getenv("PHOENIX_DB", ROOT / "phoenix.db"))
+SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", os.getenv("DATABASE_URL", ""))
 ALLOWED_STATUSES = {
     "DRAFT",
     "RESEARCHING",
@@ -57,36 +58,90 @@ def now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def connection() -> sqlite3.Connection:
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
-    db.execute("PRAGMA foreign_keys = ON")
-    return db
+class HybridRow(dict):
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
 
 
-def _ensure_column(db: sqlite3.Connection, table: str, column: str, definition: str) -> None:
-    columns = {row[1] for row in db.execute(f"PRAGMA table_info({table})")}
+class CursorCompat:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    @property
+    def rowcount(self):
+        return self.cursor.rowcount
+
+    def fetchone(self):
+        row = self.cursor.fetchone()
+        return HybridRow(row) if row else None
+
+    def fetchall(self):
+        return [HybridRow(row) for row in self.cursor.fetchall()]
+
+
+class ConnectionCompat:
+    def __init__(self, url: str):
+        self.db = psycopg.connect(url, row_factory=dict_row)
+
+    @staticmethod
+    def _translate(query: str) -> str:
+        return query.replace("?", "%s")
+
+    def execute(self, query: str, params=None) -> CursorCompat:
+        return CursorCompat(self.db.execute(self._translate(query), params or ()))
+
+    def executescript(self, script: str) -> None:
+        for statement in script.split(";"):
+            if statement.strip():
+                self.execute(statement)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        if exc_type:
+            self.db.rollback()
+        else:
+            self.db.commit()
+        self.db.close()
+
+
+def connection() -> ConnectionCompat:
+    if not SUPABASE_DB_URL:
+        raise RuntimeError("SUPABASE_DB_URL is required")
+    return ConnectionCompat(SUPABASE_DB_URL)
+
+
+def _ensure_column(db: ConnectionCompat, table: str, column: str, definition: str) -> None:
+    columns = {
+        row["column_name"]
+        for row in db.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = ?",
+            (table,),
+        ).fetchall()
+    }
     if column not in columns:
         db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def initialise() -> None:
+    if not SUPABASE_DB_URL:
+        raise RuntimeError("SUPABASE_DB_URL is required")
     with connection() as db:
         db.executescript((ROOT / "schema.sql").read_text())
-        # Keep databases created by the earlier MVP usable after the auth upgrade.
-        _ensure_column(db, "content_plans", "user_id", "TEXT REFERENCES users(id) ON DELETE CASCADE")
-        _ensure_column(db, "tiktok_accounts", "user_id", "TEXT REFERENCES users(id) ON DELETE CASCADE")
-        _ensure_column(db, "notifications", "user_id", "TEXT REFERENCES users(id) ON DELETE CASCADE")
-        db.execute("CREATE INDEX IF NOT EXISTS idx_content_user ON content_plans(user_id, created_at)")
         timestamp = now()
         db.execute(
-            """INSERT OR IGNORE INTO profiles
+            """INSERT INTO profiles
                (id, display_name, username, timezone, language, niche, created_at, updated_at)
-               VALUES ('default', 'Creator', 'creator', 'UTC', 'en', 'AI & technology', ?, ?)""",
+               VALUES ('default', 'Creator', 'creator', 'UTC', 'en', 'AI & technology', ?, ?)
+               ON CONFLICT (id) DO NOTHING""",
             (timestamp, timestamp),
         )
         db.execute(
-            """INSERT OR IGNORE INTO content_settings (id, updated_at) VALUES (1, ?)""",
+            """INSERT INTO content_settings (id, updated_at) VALUES (1, ?)
+               ON CONFLICT (id) DO NOTHING""",
             (timestamp,),
         )
 
@@ -110,7 +165,7 @@ def password_matches(password: str, encoded: str) -> bool:
         return False
 
 
-def public_user(row: sqlite3.Row | dict) -> dict:
+def public_user(row: HybridRow | dict) -> dict:
     return {
         "id": row["id"],
         "email": row["email"],
@@ -129,7 +184,7 @@ def json_bytes(payload: object) -> bytes:
     return json.dumps(payload, separators=(",", ":")).encode("utf-8")
 
 
-def plan_payload(row: sqlite3.Row) -> dict:
+def plan_payload(row: HybridRow) -> dict:
     item = dict(row)
     item["voice_required"] = bool(item.get("voice_required"))
     item["music_required"] = bool(item.get("music_required"))
@@ -140,7 +195,7 @@ def plan_payload(row: sqlite3.Row) -> dict:
 
 
 def write_notification(
-    db: sqlite3.Connection, kind: str, title: str, body: str, user_id: str | None = None
+    db: ConnectionCompat, kind: str, title: str, body: str, user_id: str | None = None
 ) -> None:
     db.execute(
         "INSERT INTO notifications (id, user_id, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -183,10 +238,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST, self.pending_headers)
         except TikTokConfigurationError as error:
             self._send_json({"error": str(error)}, HTTPStatus.CONFLICT, self.pending_headers)
+        except ContentProviderError as error:
+            self._send_json({"error": str(error)}, HTTPStatus.SERVICE_UNAVAILABLE, self.pending_headers)
         except Exception as error:
             self._send_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR, self.pending_headers)
 
-    def _current_user(self) -> sqlite3.Row | None:
+    def _current_user(self) -> HybridRow | None:
         cookie = SimpleCookie(self.headers.get("Cookie", ""))
         morsel = cookie.get("phoenix_session")
         if not morsel:
@@ -199,7 +256,7 @@ class Handler(BaseHTTPRequestHandler):
                 (token_hash, now()),
             ).fetchone()
 
-    def _require_user(self) -> sqlite3.Row:
+    def _require_user(self) -> HybridRow:
         user = self._current_user()
         if not user:
             raise AuthError("Sign in is required")
@@ -230,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
                 db.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
         self.pending_headers["Set-Cookie"] = "phoenix_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
 
-    def _profile_for_user(self, db: sqlite3.Connection, user: sqlite3.Row) -> sqlite3.Row:
+    def _profile_for_user(self, db: ConnectionCompat, user: HybridRow) -> HybridRow:
         profile = db.execute("SELECT * FROM profiles WHERE id = ?", (user["id"],)).fetchone()
         if profile:
             return profile
@@ -390,7 +447,7 @@ class Handler(BaseHTTPRequestHandler):
             with connection() as db:
                 db.execute("SELECT 1").fetchone()
             database = "healthy"
-        except sqlite3.Error:
+        except psycopg.Error:
             database = "down"
         media = MediaEngine().health()
         tiktok = TikTokClient()

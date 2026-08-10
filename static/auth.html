@@ -3,12 +3,13 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="/static/assets/phoenix-mark.svg" />
     <title>Sign in · Phoenix Autopilot</title>
     <link rel="stylesheet" href="/static/auth.css" />
   </head>
   <body>
     <div class="auth-shell">
-      <section class="auth-aside"><a class="auth-brand" href="/"><span class="auth-mark">P</span><span><strong>Phoenix</strong><small>Autopilot</small></span></a><div class="aside-copy"><div class="aside-kicker">A quieter creative system</div><h1>Make room<br />for the <em>good</em><br />ideas.</h1><p>Phoenix helps you build a consistent publishing practice without turning your voice into a content factory.</p></div><span class="aside-foot">AI-assisted · Human-reviewed</span></section>
+      <section class="auth-aside"><a class="auth-brand" href="/"><img class="auth-mark-image" src="/static/assets/phoenix-mark.svg" alt="Phoenix" /><span><strong>Phoenix</strong><small>Autopilot</small></span></a><div class="aside-copy"><div class="aside-kicker">A quieter creative system</div><h1>Make room<br />for the <em>good</em><br />ideas.</h1><p>Phoenix helps you build a consistent publishing practice without turning your voice into a content factory.</p></div><span class="aside-foot">AI-assisted · Human-reviewed</span></section>
       <main class="auth-main"><div class="auth-top"><span>Already have an account?</span><a id="top-switch" href="/login">Sign in</a></div><div class="auth-card"><div class="auth-eyebrow" id="form-eyebrow">Welcome back</div><h2 id="form-title">Sign in to Phoenix</h2><p id="form-copy">Your next good idea is waiting.</p><div class="auth-tabs"><a id="login-tab" href="/login">Sign in</a><a id="signup-tab" href="/signup">Create account</a></div><form id="auth-form"><label id="name-field" class="hidden">Display name<input name="display_name" autocomplete="name" placeholder="Your name" /></label><label>Email address<input name="email" type="email" autocomplete="email" required placeholder="you@example.com" /></label><label>Password<input name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="8 characters minimum" /></label><div class="form-error hidden" id="form-error"></div><button class="auth-button" type="submit"><span id="submit-label">Sign in</span><span class="spinner hidden" id="submit-spinner"></span><span class="arrow">→</span></button></form><p class="auth-legal">By continuing, you agree to the <a href="/terms">Terms of Service</a> and acknowledge the <a href="/privacy">Privacy Policy</a>.</p></div></main>
     </div>
     <script src="/static/auth.js"></script>

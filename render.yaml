@@ -11,8 +11,18 @@ services:
         value: 0.0.0.0
       - key: PHOENIX_PORT
         value: 10000
-      - key: PHOENIX_DB
-        value: /tmp/phoenix.db
+      - key: SUPABASE_URL
+        value: https://whynicscergmbamykgah.supabase.co
+      - key: SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: SUPABASE_DB_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
       - key: PUBLIC_BASE_URL
         value: https://tiktok.senseiphoenix.name.ng
       - key: TIKTOK_CLIENT_KEY
@@ -26,4 +36,8 @@ services:
       - key: PHOENIX_AI_ENDPOINT
         value: https://combined-alidia-suhailtechlnfo-01b0509f.koyeb.app
       - key: PHOENIX_AI_API_KEY
+        sync: false
+      - key: TAVILY_API_KEY
+        sync: false
+      - key: SERPER_API_KEY
         sync: false

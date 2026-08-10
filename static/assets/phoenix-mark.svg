@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title>Phoenix Autopilot</title>
+  <defs><linearGradient id="phoenix" x1="8" y1="5" x2="57" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#fb8561"/><stop offset="1" stop-color="#e95746"/></linearGradient></defs>
+  <rect width="64" height="64" rx="18" fill="url(#phoenix)"/>
+  <path fill="#fff" d="M20 47V17h12.4c7.5 0 11.9 3.7 11.9 9.9 0 6.3-4.4 10-11.9 10h-5.1V47H20Zm7.3-16.2h4.5c3.3 0 5.1-1.3 5.1-3.9 0-2.5-1.8-3.8-5.1-3.8h-4.5v7.7Z"/>
+</svg>
