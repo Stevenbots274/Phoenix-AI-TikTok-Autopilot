@@ -17,8 +17,7 @@ Phoenix AI TikTok Autopilot is a web-based automation platform that allows users
 
 ## Documentation
 
-- [SRS Part 1](SRS.md) — Software Requirements Specification v1.0
-- [SRS Part 2](SRS-part2.md) — SRS continuation (analytics, workflow, build order)
+- [Blueprint v1.0](blueprint%20v1.0.md) — Software Requirements Specification (full master blueprint, chapters 1–5.18 plus end-to-end workflow and build order)
 
 ## Tech Stack
 
