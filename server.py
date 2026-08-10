@@ -19,7 +19,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import psycopg
 from psycopg.rows import dict_row
@@ -33,6 +33,19 @@ from tiktok import TikTokClient, TikTokConfigurationError
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", os.getenv("DATABASE_URL", ""))
+ACTIVE_DB_URL: str | None = None
+POOLER_REGIONS = (
+    "us-east-1",
+    "us-west-1",
+    "us-west-2",
+    "eu-central-1",
+    "eu-west-1",
+    "ap-southeast-1",
+    "ap-northeast-1",
+    "sa-east-1",
+    "us-east-2",
+    "ca-central-1",
+)
 ALLOWED_STATUSES = {
     "DRAFT",
     "RESEARCHING",
@@ -83,7 +96,7 @@ class CursorCompat:
 
 class ConnectionCompat:
     def __init__(self, url: str):
-        self.db = psycopg.connect(url, row_factory=dict_row)
+        self.db = psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
 
     @staticmethod
     def _translate(query: str) -> str:
@@ -109,9 +122,43 @@ class ConnectionCompat:
 
 
 def connection() -> ConnectionCompat:
+    global ACTIVE_DB_URL
     if not SUPABASE_DB_URL:
         raise RuntimeError("SUPABASE_DB_URL is required")
-    return ConnectionCompat(SUPABASE_DB_URL)
+    candidates = [ACTIVE_DB_URL] if ACTIVE_DB_URL else []
+    candidates.extend(_supabase_db_candidates())
+    last_error = None
+    for candidate in dict.fromkeys(item for item in candidates if item):
+        try:
+            db = ConnectionCompat(candidate)
+            ACTIVE_DB_URL = candidate
+            return db
+        except psycopg.OperationalError as error:
+            last_error = error
+    raise RuntimeError(f"Unable to connect to Supabase PostgreSQL: {last_error}")
+
+
+def _supabase_db_candidates() -> list[str]:
+    parsed = urlsplit(SUPABASE_DB_URL)
+    if not parsed.hostname or not parsed.username or parsed.password is None:
+        return [SUPABASE_DB_URL]
+    project_ref = os.getenv("SUPABASE_PROJECT_REF", "")
+    if not project_ref:
+        project_ref = os.getenv("SUPABASE_URL", "").split("//")[-1].split(".")[0]
+    if not project_ref:
+        return [SUPABASE_DB_URL]
+    pooler_user = parsed.username if parsed.username.startswith("postgres.") else f"postgres.{project_ref}"
+    password = quote(parsed.password, safe="")
+    database = parsed.path or "/postgres"
+    query = parsed.query or "sslmode=require"
+    candidates = [SUPABASE_DB_URL]
+    for region in POOLER_REGIONS:
+        for port in (6543, 5432):
+            candidates.append(
+                f"postgresql://{quote(pooler_user, safe='')}:"
+                f"{password}@aws-0-{region}.pooler.supabase.com:{port}{database}?{query}"
+            )
+    return candidates
 
 
 def _ensure_column(db: ConnectionCompat, table: str, column: str, definition: str) -> None:
