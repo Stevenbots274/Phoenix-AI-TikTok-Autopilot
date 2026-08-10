@@ -15,6 +15,7 @@ class TikTokConfigurationError(RuntimeError):
 class TikTokClient:
     authorize_url = "https://www.tiktok.com/v2/auth/authorize/"
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
+    creator_info_url = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
     publish_url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
 
     def __init__(self):
@@ -88,9 +89,16 @@ class TikTokClient:
         """Initialize a pull-from-URL post; the URL must be publicly reachable by TikTok."""
         if not access_token:
             raise TikTokConfigurationError("A TikTok access token is required to publish.")
+        creator_info = self.creator_info(access_token)
+        allowed_privacy = creator_info.get("privacy_level_options", [])
+        privacy_level = allowed_privacy[0] if allowed_privacy else "SELF_ONLY"
         payload = json.dumps(
             {
-                "post_info": {"title": caption[:150], "privacy_level": "PUBLIC_TO_EVERYONE", "disable_comment": False},
+                "post_info": {
+                    "title": caption[:150],
+                    "privacy_level": privacy_level,
+                    "disable_comment": False,
+                },
                 "source_info": {"source": "PULL_FROM_URL", "video_url": video_url},
             }
         ).encode()
@@ -101,3 +109,18 @@ class TikTokClient:
         )
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.loads(response.read().decode())
+
+    def creator_info(self, access_token: str) -> dict:
+        """Query TikTok before posting so privacy and duration follow creator settings."""
+        if not access_token:
+            raise TikTokConfigurationError("A TikTok access token is required.")
+        request = urllib.request.Request(
+            self.creator_info_url,
+            data=b"{}",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode())
+        if data.get("error", {}).get("code") not in (None, "ok"):
+            raise TikTokConfigurationError(data["error"].get("message", "TikTok creator settings failed"))
+        return data.get("data", data)

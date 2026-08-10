@@ -1,4 +1,4 @@
-const state = { dashboard: null, content: [], settings: null };
+const state = { dashboard: null, content: [], settings: null, user: null };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -61,12 +61,24 @@ function renderHealth(health) {
 function emptyContent(message) { return `<div class="empty-state">${message}</div>`; }
 
 async function load() {
+  const auth = await request('/api/auth/me');
+  if (!auth.authenticated) { window.location.href = '/login'; return; }
+  state.user = auth.user;
+  renderUser();
   const [dashboard, content, settings, tiktok, notifications] = await Promise.all([
     request('/api/dashboard'), request('/api/content'), request('/api/settings'), request('/api/tiktok/status'), request('/api/notifications'),
   ]);
   state.dashboard = dashboard; state.content = content.items; state.settings = settings;
   renderDashboard(); renderStudio(); renderQueue(); renderSettings(settings); renderTikTok(tiktok);
   $('#notification-count').style.display = notifications.items.some((item) => !item.read_at) ? 'block' : 'none';
+}
+
+function renderUser() {
+  const name = state.user.display_name || 'Creator';
+  $('#user-name').textContent = name;
+  $('#user-email').textContent = state.user.email;
+  $('#user-avatar').textContent = name.slice(0, 1).toUpperCase();
+  $('#page-title').textContent = `Good morning, ${name}`;
 }
 
 function renderSettings(data) {
@@ -84,7 +96,7 @@ function renderTikTok(data) {
 function switchView(view) {
   $$('.view').forEach((item) => item.classList.toggle('hidden', item.id !== `view-${view}`));
   $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === view));
-  const title = { dashboard:'Good morning, Creator', studio:'Content studio', calendar:'Publishing queue', settings:'Workspace settings' }[view];
+  const title = { dashboard:`Good morning, ${state.user?.display_name || 'Creator'}`, studio:'Content studio', calendar:'Publishing queue', settings:'Workspace settings' }[view];
   const kicker = { dashboard:'Workspace overview', studio:'Create and refine', calendar:'Plan ahead', settings:'Make it yours' }[view];
   $('#page-title').textContent = title; $('#page-kicker').textContent = kicker;
 }
@@ -119,5 +131,6 @@ $$('[data-view]').forEach((button) => button.addEventListener('click', () => swi
 ['#open-generate','#open-generate-secondary','#open-generate-studio','#open-generate-calendar'].forEach((selector) => $(selector)?.addEventListener('click', openModal));
 $('#close-generate').addEventListener('click', closeModal); $('#generate-modal').addEventListener('click', (event) => { if (event.target.id === 'generate-modal') closeModal(); });
 $('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', connectTikTok);
+$('#logout').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST', body:'{}' }); window.location.href = '/'; });
 $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
-load().catch((error) => showToast(error.message));
+load().catch((error) => { if (error.message === 'Sign in is required') window.location.href = '/login'; else showToast(error.message); });

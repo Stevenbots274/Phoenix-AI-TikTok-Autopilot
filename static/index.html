@@ -3,72 +3,31 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#10131a" />
-    <title>Phoenix Autopilot</title>
-    <link rel="stylesheet" href="/static/styles.css" />
+    <meta name="description" content="Phoenix Autopilot turns your content direction into an intentional TikTok publishing system." />
+    <title>Phoenix Autopilot · Make your next post matter</title>
+    <link rel="stylesheet" href="/static/landing.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand">
-          <div class="brand-mark">P</div>
-          <div><strong>Phoenix</strong><span>Autopilot</span></div>
-        </div>
-        <div class="eyebrow nav-label">Workspace</div>
-        <nav class="nav-list" aria-label="Main navigation">
-          <button class="nav-item active" data-view="dashboard"><span class="nav-icon">◈</span>Overview</button>
-          <button class="nav-item" data-view="studio"><span class="nav-icon">✦</span>Content studio</button>
-          <button class="nav-item" data-view="calendar"><span class="nav-icon">▦</span>Publishing queue</button>
-          <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Settings</button>
-        </nav>
-        <div class="sidebar-spacer"></div>
-        <div class="tiktok-card" id="tiktok-card">
-          <div class="status-line"><span class="status-dot muted"></span><span>TikTok account</span></div>
-          <strong id="tiktok-name">Not connected</strong>
-          <p id="tiktok-message">Connect when your developer app is ready.</p>
-          <button class="button button-dark button-small" id="connect-tiktok">Connect TikTok</button>
-        </div>
-        <div class="user-chip"><div class="avatar">C</div><div><strong>Creator</strong><span>Personal workspace</span></div><span class="more">•••</span></div>
-      </aside>
+    <div class="landing-shell">
+      <nav class="landing-nav">
+        <a class="landing-brand" href="/"><span class="landing-mark">P</span><span><strong>Phoenix</strong><small>Autopilot</small></span></a>
+        <div class="landing-links"><a href="#how-it-works">How it works</a><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div>
+        <div class="landing-actions"><a class="landing-signin" href="/login">Sign in</a><a class="landing-cta" href="/signup">Start creating <span>↗</span></a></div>
+      </nav>
 
-      <main class="main-content">
-        <header class="topbar">
-          <div><div class="eyebrow" id="page-kicker">Workspace overview</div><h1 id="page-title">Good morning, Creator</h1></div>
-          <div class="topbar-actions"><span class="date-chip" id="today"></span><button class="icon-button" id="notifications" aria-label="Notifications">♧<span class="notification-badge" id="notification-count"></span></button><button class="button button-primary" id="open-generate">Create content <span>+</span></button></div>
-        </header>
-
-        <section class="view" id="view-dashboard">
-          <div class="stats-grid">
-            <article class="stat-card accent"><div class="stat-head"><span>Automation</span><span class="stat-icon">◉</span></div><strong id="stat-automation">Paused</strong><div class="stat-meta"><span class="pulse"></span><span id="stat-automation-meta">Ready to configure</span></div></article>
-            <article class="stat-card"><div class="stat-head"><span>Scheduled posts</span><span class="stat-icon">◷</span></div><strong id="stat-scheduled">0</strong><div class="stat-meta">Across your queue</div></article>
-            <article class="stat-card"><div class="stat-head"><span>Ready to publish</span><span class="stat-icon">✦</span></div><strong id="stat-ready">0</strong><div class="stat-meta">Waiting for your review</div></article>
-            <article class="stat-card"><div class="stat-head"><span>Published</span><span class="stat-icon">↗</span></div><strong id="stat-published">0</strong><div class="stat-meta">Your content history</div></article>
-          </div>
-
-          <div class="feature-grid">
-            <article class="automation-panel">
-              <div class="panel-top"><div><div class="eyebrow light">Autopilot control</div><h2 id="automation-title">Your studio is waiting.</h2></div><label class="toggle"><input type="checkbox" id="automation-toggle" /><span></span></label></div>
-              <p class="panel-copy">Set your direction once. Phoenix researches, scripts, and queues a varied mix of TikTok-ready ideas around your niche.</p>
-              <div class="pipeline"><div class="pipeline-step done"><span>01</span><strong>Research</strong></div><i></i><div class="pipeline-step"><span>02</span><strong>Direct</strong></div><i></i><div class="pipeline-step"><span>03</span><strong>Render</strong></div><i></i><div class="pipeline-step"><span>04</span><strong>Publish</strong></div></div>
-              <div class="panel-footer"><span>Approval mode</span><button class="text-button" data-view="settings">Configure schedule →</button></div>
-            </article>
-            <article class="next-panel"><div class="panel-heading"><span>Next in queue</span><span class="live-pill"><span class="status-dot"></span>Live view</span></div><div class="next-empty" id="next-post"><div class="empty-orb">✦</div><strong>No post scheduled yet</strong><p>Create your first content plan and schedule it here.</p><button class="button button-outline" id="open-generate-secondary">Generate a plan</button></div></article>
-          </div>
-
-          <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Content library</div><h2>Recent plans</h2></div><button class="text-button" data-view="studio">Open studio →</button></div><div class="content-grid" id="recent-content"></div></section>
+      <main>
+        <section class="hero">
+          <div class="hero-copy"><div class="hero-kicker"><span class="kicker-line"></span>AI content direction for creators</div><h1>Make your next post <em>matter.</em></h1><p class="hero-lede">Phoenix turns a clear idea into a researched, scripted, and scheduled TikTok content plan, so your publishing system feels as intentional as your point of view.</p><div class="hero-actions"><a class="hero-button" href="/signup">Build your autopilot <span>→</span></a><a class="hero-secondary" href="#how-it-works">See how it works <span>↓</span></a></div><div class="hero-proof"><div class="proof-avatars"><span>J</span><span>M</span><span>A</span></div><span>Made for a more consistent<br /><strong>creative practice.</strong></span></div></div>
+          <div class="hero-art"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="dashboard-card"><div class="mini-top"><span><i></i>Autopilot active</span><span class="mini-dots">•••</span></div><div class="mini-title">Tomorrow's direction</div><div class="mini-topic">The overlooked AI habit that saves creators hours.</div><div class="mini-progress"><div><span>Research</span><b>Complete</b></div><div class="progress-track"><i></i></div><div><span>Script</span><b>In progress</b></div><div class="progress-track"><i class="short"></i></div></div><div class="mini-footer"><span>VOICE VIDEO</span><span>35 SEC</span><span>09:00 AM</span></div></div><div class="floating-note note-one"><span>✦</span><div><b>Fresh angle found</b><small>AI research finished</small></div></div><div class="floating-note note-two"><span>↗</span><div><b>Ready to publish</b><small>Review before posting</small></div></div></div>
         </section>
 
-        <section class="view hidden" id="view-studio"><div class="section-heading"><div><div class="eyebrow">Content studio</div><h2>Shape the next post</h2></div><button class="button button-primary" id="open-generate-studio">Create content <span>+</span></button></div><div class="studio-layout"><div class="studio-intro"><div class="studio-glow">✦</div><h2>From a thought<br />to a <em>publishable</em> post.</h2><p>Phoenix picks the right format for the idea instead of forcing every story into the same template.</p><div class="format-list"><span>Voice video</span><span>Music video</span><span>Slideshow</span><span>Silent video</span></div></div><div class="studio-list"><div class="eyebrow">Your latest work</div><div id="studio-content"></div></div></div></section>
+        <section class="signal-strip"><span>ONE WORKSPACE FOR</span><strong>Direction</strong><strong>Research</strong><strong>Scripts</strong><strong>Scheduling</strong><strong>Publishing</strong></section>
 
-        <section class="view hidden" id="view-calendar"><div class="section-heading"><div><div class="eyebrow">Publishing queue</div><h2>Schedule with intention</h2></div><button class="button button-primary" id="open-generate-calendar">Create content <span>+</span></button></div><div class="queue-panel"><div class="queue-header"><span>Planned content</span><span id="queue-count">0 posts</span></div><div id="queue-content" class="queue-list"></div></div></section>
+        <section class="how-section" id="how-it-works"><div class="section-label">The Phoenix method</div><div class="how-heading"><h2>Less content noise.<br /><em>More signal.</em></h2><p>Every part of the system is designed to protect the part that matters most: your perspective.</p></div><div class="feature-grid"><article><span class="feature-number">01</span><h3>Direct the idea</h3><p>Give Phoenix your niche, tone, and constraints. The content director chooses formats that fit the story instead of forcing everything into one template.</p><a href="/signup">Set your direction <span>→</span></a></article><article><span class="feature-number">02</span><h3>Make it publishable</h3><p>Get a structured hook, script, caption, hashtags, and visual instructions in one place. Review it before anything leaves your workspace.</p><a href="/signup">Open the studio <span>→</span></a></article><article><span class="feature-number">03</span><h3>Keep showing up</h3><p>Schedule your queue and let an approval-first autopilot turn a good creative practice into a consistent one.</p><a href="/signup">Create a queue <span>→</span></a></article></div></section>
 
-        <section class="view hidden" id="view-settings"><div class="section-heading"><div><div class="eyebrow">Workspace settings</div><h2>Give Phoenix direction.</h2></div><button class="button button-primary" id="save-settings">Save changes</button></div><form class="settings-grid" id="settings-form"><div class="settings-card"><div class="eyebrow">Creator profile</div><h3>How should we address you?</h3><label>Display name<input name="display_name" /></label><label>Username<input name="username" /></label><label>Content niche<input name="niche" /></label><label>Timezone<select name="timezone"><option>UTC</option><option>Africa/Lagos</option><option>America/New_York</option><option>Europe/London</option></select></label></div><div class="settings-card"><div class="eyebrow">Autopilot rules</div><h3>Make every post feel like you.</h3><label>Permanent instructions<textarea name="permanent_instructions" placeholder="Confident, clear, educational. Avoid filler."></textarea></label><label>Approval mode<select name="approval_mode"><option value="approval">Review before publishing</option><option value="automatic">Publish automatically</option></select></label><label>Default duration<select name="default_duration"><option value="25">25 seconds</option><option value="35">35 seconds</option><option value="50">50 seconds</option></select></label><label>Posting time<input type="time" name="posting_time" /></label></div></form><div class="health-panel"><div><div class="eyebrow">System health</div><h3>Everything Phoenix needs to run</h3></div><div class="health-items" id="health-items"></div></div></section>
-        <footer class="legal-footer"><span>Phoenix Autopilot · Built for intentional publishing</span><span><a href="/terms">Terms of Service</a><a href="/privacy">Privacy Policy</a></span></footer>
+        <section class="closing-card"><div><div class="section-label">A calmer way to publish</div><h2>Your ideas deserve<br /><em>a system.</em></h2></div><a class="hero-button light-button" href="/signup">Start with Phoenix <span>↗</span></a></section>
       </main>
+      <footer class="landing-footer"><span>© 2026 Phoenix Autopilot</span><span>AI-assisted. Human-reviewed. <a href="/terms">Terms</a><a href="/privacy">Privacy</a></span></footer>
     </div>
-
-    <div class="modal-backdrop hidden" id="generate-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" id="close-generate" aria-label="Close">×</button><div class="eyebrow">New content plan</div><h2 id="modal-title">What should Phoenix explore?</h2><p>Leave the topic blank to let the content director choose a fresh angle.</p><form id="generate-form"><label>Topic or idea<input name="topic" placeholder="e.g. 3 AI workflows saving creators time" /></label><label>Niche<input name="niche" value="AI & technology" /></label><div class="form-row"><label>Format<select name="format"><option value="AUTO">Let Phoenix choose</option><option value="VOICE_VIDEO">Voice video</option><option value="MUSIC_VIDEO">Music video</option><option value="SLIDESHOW">Slideshow</option><option value="SILENT_VIDEO">Silent video</option><option value="VOICE_MUSIC">Voice + music</option></select></label><label>Duration<select name="duration_seconds"><option value="25">25 sec</option><option value="35" selected>35 sec</option><option value="50">50 sec</option></select></label></div><label class="check-label"><input type="checkbox" name="research" /> Research this topic for fresh sources</label><button class="button button-primary button-wide" type="submit"><span id="generate-label">Generate content plan</span><span class="spinner hidden" id="generate-spinner"></span></button></form></div></div>
-    <div class="toast hidden" id="toast"></div>
-    <script src="/static/app.js"></script>
   </body>
 </html>

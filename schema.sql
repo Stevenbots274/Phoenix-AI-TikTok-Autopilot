@@ -1,5 +1,24 @@
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY,
+  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  password_hash TEXT NOT NULL,
+  display_name TEXT NOT NULL DEFAULT 'Creator',
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  email_verified INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL DEFAULT 'Creator',
@@ -26,6 +45,7 @@ CREATE TABLE IF NOT EXISTS content_settings (
 
 CREATE TABLE IF NOT EXISTS content_plans (
   id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   topic TEXT NOT NULL,
   niche TEXT NOT NULL,
   format TEXT NOT NULL,
@@ -77,6 +97,7 @@ CREATE TABLE IF NOT EXISTS scheduled_posts (
 
 CREATE TABLE IF NOT EXISTS tiktok_accounts (
   id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   open_id TEXT UNIQUE,
   username TEXT,
   access_token TEXT,
@@ -102,6 +123,7 @@ CREATE TABLE IF NOT EXISTS published_posts (
 
 CREATE TABLE IF NOT EXISTS notifications (
   id TEXT PRIMARY KEY,
+  user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,
   title TEXT NOT NULL,
   body TEXT NOT NULL,
@@ -133,3 +155,4 @@ CREATE TABLE IF NOT EXISTS system_logs (
 CREATE INDEX IF NOT EXISTS idx_content_status ON content_plans(status);
 CREATE INDEX IF NOT EXISTS idx_schedule_time ON scheduled_posts(scheduled_at, status);
 CREATE INDEX IF NOT EXISTS idx_notifications_read ON notifications(read_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token_hash);

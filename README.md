@@ -29,6 +29,16 @@ python3 server.py
 
 Open `http://127.0.0.1:8000`. Copy `.env.example` to `.env` only when enabling provider integrations. The local content director works without an API key and produces structured plans for all supported formats.
 
+## Public Pages and Authentication
+
+- `/` is the public landing page
+- `/signup` creates an account immediately; email verification is intentionally not required
+- `/login` signs in to the protected workspace
+- `/app` is the authenticated dashboard
+- `/terms` and `/privacy` are public legal pages for the TikTok developer app
+
+Passwords are stored as salted scrypt hashes. Sessions use HttpOnly cookies, and content records are scoped to the signed-in account.
+
 ## Included MVP
 
 - Dashboard with automation status, queue counts, recent content, and system health
@@ -39,7 +49,7 @@ Open `http://127.0.0.1:8000`. Copy `.env.example` to `.env` only when enabling p
 - SQLite schema for profiles, settings, content, scripts, videos, schedules, notifications, usage, and logs
 - Approval and automatic automation modes with scheduling records
 - FFmpeg/TTS media boundary with 1080x1920 MP4 validation and clear setup status
-- TikTok OAuth and Content Posting API boundary with backend-only token storage
+- TikTok OAuth and Content Posting API boundary with backend-only token storage and a creator-settings check before posting
 
 ## TikTok Setup
 
@@ -57,9 +67,9 @@ The publishing boundary expects a publicly reachable rendered video URL. Actual 
 
 | Component | Technology |
 |-----------|------------|
-| Frontend / App | Next.js |
-| Database | Supabase PostgreSQL |
-| Storage | Supabase Storage |
+| Frontend / App | HTML, CSS, JavaScript, Python standard library |
+| Database | SQLite (MVP boundary ready for PostgreSQL) |
+| Storage | Local/Render storage boundary |
 | AI | Phoenix AI Router (Claude Opus 5, GPT-5.6-SOL) |
 | Web Search | Tavily (primary), DuckDuckGo Instant Answer API and Serper.dev (backups) |
 | Video | FFmpeg |

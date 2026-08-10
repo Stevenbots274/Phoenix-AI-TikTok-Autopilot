@@ -10,6 +10,7 @@ os.sys.path.insert(0, str(ROOT))
 
 from content_director import ContentDirector
 from media_engine import MediaEngine, RenderSpec
+from server import password_hash, password_matches
 
 
 class ContentDirectorTests(unittest.TestCase):
@@ -40,6 +41,14 @@ class MediaEngineTests(unittest.TestCase):
     def test_invalid_dimensions_are_rejected(self):
         with self.assertRaises(ValueError):
             MediaEngine.validate_spec(RenderSpec(width=1920, height=1080))
+
+
+class AuthenticationTests(unittest.TestCase):
+    def test_passwords_are_salted_and_verifiable(self):
+        encoded = password_hash("a-secure-test-password")
+        self.assertTrue(password_matches("a-secure-test-password", encoded))
+        self.assertFalse(password_matches("wrong-password", encoded))
+        self.assertNotEqual(encoded, password_hash("a-secure-test-password"))
 
 
 if __name__ == "__main__":
