@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: phoenix-ai-tiktok-autopilot
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python3 server.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: PHOENIX_HOST
+        value: 0.0.0.0
+      - key: PHOENIX_PORT
+        value: 10000
+      - key: PHOENIX_DB
+        value: /tmp/phoenix.db
+      - key: PUBLIC_BASE_URL
+        value: https://tiktok.senseiphoenix.name.ng
+      - key: TIKTOK_CLIENT_KEY
+        sync: false
+      - key: TIKTOK_CLIENT_SECRET
+        sync: false
+      - key: TIKTOK_REDIRECT_URI
+        value: https://tiktok.senseiphoenix.name.ng/api/tiktok/oauth/callback
+      - key: TIKTOK_SCOPES
+        value: user.info.basic,video.publish
+      - key: PHOENIX_AI_ENDPOINT
+        value: https://combined-alidia-suhailtechlnfo-01b0509f.koyeb.app
+      - key: PHOENIX_AI_API_KEY
+        sync: false

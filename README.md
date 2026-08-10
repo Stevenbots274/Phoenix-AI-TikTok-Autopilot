@@ -45,6 +45,12 @@ Open `http://127.0.0.1:8000`. Copy `.env.example` to `.env` only when enabling p
 
 TikTok credentials are not required to run the dashboard or generate content. Before connecting or publishing, create an approved TikTok developer app and set `TIKTOK_CLIENT_KEY`, `TIKTOK_CLIENT_SECRET`, and `TIKTOK_REDIRECT_URI` from `.env.example`. The app must have the appropriate approved scopes, including `user.info.basic` and `video.publish` where TikTok grants them.
 
+For the deployed domain, use these URLs in the TikTok developer console:
+
+- Terms of Service: `https://tiktok.senseiphoenix.name.ng/terms`
+- Privacy Policy: `https://tiktok.senseiphoenix.name.ng/privacy`
+- OAuth redirect URI: `https://tiktok.senseiphoenix.name.ng/api/tiktok/oauth/callback`
+
 The publishing boundary expects a publicly reachable rendered video URL. Actual rendering and the worker that uploads generated media are intentionally isolated behind `media_engine.py` for the next implementation milestone.
 
 ## Tech Stack

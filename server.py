@@ -448,7 +448,13 @@ class Handler(BaseHTTPRequestHandler):
         return {"read": True}
 
     def _serve_static(self, path: str) -> None:
-        relative = "index.html" if path in ("", "/") else path.removeprefix("/")
+        legal_pages = {
+            "/terms": "terms.html",
+            "/terms/": "terms.html",
+            "/privacy": "privacy.html",
+            "/privacy/": "privacy.html",
+        }
+        relative = legal_pages.get(path, "index.html" if path in ("", "/") else path.removeprefix("/"))
         if relative.startswith("static/"):
             relative = relative.removeprefix("static/")
         candidate = (STATIC / relative).resolve()

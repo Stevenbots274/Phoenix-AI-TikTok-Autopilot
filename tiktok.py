@@ -21,7 +21,8 @@ class TikTokClient:
         self.client_key = os.getenv("TIKTOK_CLIENT_KEY", "")
         self.client_secret = os.getenv("TIKTOK_CLIENT_SECRET", "")
         self.redirect_uri = os.getenv(
-            "TIKTOK_REDIRECT_URI", "http://localhost:8000/api/tiktok/oauth/callback"
+            "TIKTOK_REDIRECT_URI",
+            "https://tiktok.senseiphoenix.name.ng/api/tiktok/oauth/callback",
         )
         self.scopes = os.getenv("TIKTOK_SCOPES", "user.info.basic,video.publish")
 
