@@ -61,7 +61,7 @@ For the deployed domain, use these URLs in the TikTok developer console:
 - Privacy Policy: `https://tiktok.senseiphoenix.name.ng/privacy`
 - OAuth redirect URI: `https://tiktok.senseiphoenix.name.ng/api/tiktok/oauth/callback`
 
-The publishing boundary expects a publicly reachable rendered video URL. Actual rendering and the worker that uploads generated media are intentionally isolated behind `media_engine.py` for the next implementation milestone.
+The publishing flow renders a 1080x1920 MP4 with FFmpeg, uploads it to the configured Supabase Storage bucket, and sends its public URL through TikTok's Content Posting API. If Storage credentials are unavailable, the service can serve the rendered file from its public media route for immediate publishing.
 
 ## Tech Stack
 

@@ -17,6 +17,7 @@ class TikTokClient:
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
     creator_info_url = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
     publish_url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
+    publish_status_url = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
 
     def __init__(self):
         self.client_key = os.getenv("TIKTOK_CLIENT_KEY", "")
@@ -123,4 +124,18 @@ class TikTokClient:
             data = json.loads(response.read().decode())
         if data.get("error", {}).get("code") not in (None, "ok"):
             raise TikTokConfigurationError(data["error"].get("message", "TikTok creator settings failed"))
+        return data.get("data", data)
+
+    def publish_status(self, access_token: str, publish_id: str) -> dict:
+        if not access_token or not publish_id:
+            raise TikTokConfigurationError("TikTok publish status needs an access token and publish ID.")
+        request = urllib.request.Request(
+            self.publish_status_url,
+            data=json.dumps({"publish_id": publish_id}).encode(),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode())
+        if data.get("error", {}).get("code") not in (None, "ok"):
+            raise TikTokConfigurationError(data["error"].get("message", "TikTok publish status failed"))
         return data.get("data", data)

@@ -13,13 +13,15 @@ import hashlib
 import hmac
 import os
 import secrets
+import threading
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urlsplit
 
 import psycopg
 from psycopg.rows import dict_row
@@ -27,11 +29,13 @@ from psycopg.rows import dict_row
 from content_director import ContentDirector, ContentProviderError
 from media_engine import MediaEngine
 from search_manager import SearchManager, serialise_results
+from storage import MediaStorage, StorageError
 from tiktok import TikTokClient, TikTokConfigurationError
 
 
 ROOT = Path(__file__).resolve().parent
 STATIC = ROOT / "static"
+MEDIA_ROOT = ROOT / "media"
 SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", os.getenv("DATABASE_URL", ""))
 ACTIVE_DB_URL: str | None = None
 POOLER_REGIONS = (
@@ -265,6 +269,221 @@ def write_notification(
     )
 
 
+def _expiry_from_seconds(value: object) -> str | None:
+    try:
+        return (datetime.now(timezone.utc) + timedelta(seconds=int(value))).isoformat()
+    except (TypeError, ValueError):
+        return None
+
+
+def _token_is_expiring(value: object) -> bool:
+    if not value:
+        return False
+    try:
+        expiry = value if isinstance(value, datetime) else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        return expiry <= datetime.now(timezone.utc) + timedelta(seconds=60)
+    except ValueError:
+        return False
+
+
+def _access_token(account: HybridRow) -> str:
+    token = account["access_token"]
+    if not _token_is_expiring(account.get("expires_at")) or not account.get("refresh_token"):
+        if not token:
+            raise TikTokConfigurationError("The connected TikTok account has no access token.")
+        return token
+    refreshed = TikTokClient().refresh_access_token(account["refresh_token"])
+    token = refreshed.get("access_token")
+    if not token:
+        raise TikTokConfigurationError("TikTok could not refresh the connected account.")
+    with connection() as db:
+        db.execute(
+            """UPDATE tiktok_accounts SET access_token = ?, refresh_token = ?, expires_at = ?,
+               refresh_expires_at = ?, updated_at = ? WHERE id = ?""",
+            (
+                token,
+                refreshed.get("refresh_token", account["refresh_token"]),
+                _expiry_from_seconds(refreshed.get("expires_in")),
+                _expiry_from_seconds(refreshed.get("refresh_expires_in")),
+                now(),
+                account.get("id") or account.get("account_id"),
+            ),
+        )
+    return token
+
+
+def render_content_for_user(user_id: str, content_id: str) -> dict:
+    MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+    with connection() as db:
+        content = db.execute(
+            "SELECT * FROM content_plans WHERE id = ? AND user_id = ?", (content_id, user_id)
+        ).fetchone()
+        video = db.execute(
+            "SELECT * FROM videos WHERE content_id = ? ORDER BY created_at DESC LIMIT 1", (content_id,)
+        ).fetchone()
+    if not content:
+        raise ValueError("Content not found")
+    if video and video.get("render_status") == "READY" and video.get("storage_url"):
+        return dict(video)
+    restore_status = content["status"] if content["status"] in ("READY", "SCHEDULED") else "READY"
+    video_id = video["id"] if video else str(uuid.uuid4())
+    with connection() as db:
+        if not video:
+            db.execute(
+                "INSERT INTO videos (id, content_id, duration, render_status, created_at) VALUES (?, ?, ?, 'QUEUED', ?)",
+                (video_id, content_id, content["duration_seconds"], now()),
+            )
+        db.execute("UPDATE videos SET render_status = ? WHERE id = ?", ("RENDERING", video_id))
+        db.execute("UPDATE content_plans SET status = ?, updated_at = ? WHERE id = ?", ("VIDEO_RENDERING", now(), content_id))
+    output_path = MEDIA_ROOT / f"{content_id}.mp4"
+    try:
+        result = MediaEngine().render(
+            topic=content["topic"],
+            hook=content["hook"],
+            script=content["script"],
+            duration_seconds=content["duration_seconds"],
+            output_path=output_path,
+        )
+        storage_url = MediaStorage().upload(output_path, f"{user_id}/{content_id}.mp4")
+        if not storage_url:
+            public_base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+            if not public_base:
+                raise StorageError("PUBLIC_BASE_URL is required when Supabase Storage is unavailable.")
+            storage_url = f"{public_base}/media/{quote(output_path.name)}"
+        with connection() as db:
+            db.execute(
+                """UPDATE videos SET storage_url = ?, duration = ?, resolution = ?, file_size = ?,
+                   render_status = ? WHERE id = ?""",
+                (storage_url, result["duration"], result["resolution"], result["file_size"], "READY", video_id),
+            )
+            db.execute("UPDATE content_plans SET status = ?, updated_at = ? WHERE id = ?", (restore_status, now(), content_id))
+        return {"id": video_id, **result, "storage_url": storage_url, "render_status": "READY"}
+    except (StorageError, RuntimeError) as error:
+        with connection() as db:
+            db.execute("UPDATE videos SET render_status = ? WHERE id = ?", ("FAILED", video_id))
+            db.execute("UPDATE content_plans SET status = ?, updated_at = ? WHERE id = ?", (restore_status, now(), content_id))
+        raise ContentProviderError(str(error)) from error
+
+
+def publish_content_for_user(user_id: str, content_id: str, scheduled_post_id: str | None = None) -> dict:
+    with connection() as db:
+        content = db.execute(
+            "SELECT * FROM content_plans WHERE id = ? AND user_id = ?", (content_id, user_id)
+        ).fetchone()
+        account = db.execute(
+            "SELECT * FROM tiktok_accounts WHERE user_id = ? AND status = 'CONNECTED' ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        ).fetchone()
+        existing = db.execute(
+            "SELECT 1 FROM published_posts WHERE content_id = ? AND status IN ('INITIATED', 'PROCESSING', 'PUBLISHED') LIMIT 1",
+            (content_id,),
+        ).fetchone()
+    if not content:
+        raise ValueError("Content not found")
+    if content["status"] not in ("READY", "SCHEDULED", "PUBLISHING"):
+        raise ValueError("Approve this content before publishing it")
+    if existing:
+        raise ValueError("This content has already been sent to TikTok")
+    if not account:
+        raise TikTokConfigurationError("Connect a TikTok account before publishing.")
+    video = render_content_for_user(user_id, content_id)
+    token = _access_token(account)
+    hashtags = " ".join(decode_json(content.get("hashtags"), []))
+    caption = f"{content['caption']}\n\n{hashtags}".strip()
+    result = TikTokClient().initialize_video_post(token, video["storage_url"], caption)
+    data = result.get("data", result) if isinstance(result, dict) else {}
+    publish_id = data.get("publish_id")
+    if not publish_id:
+        raise TikTokConfigurationError("TikTok did not return a publish ID.")
+    with connection() as db:
+        db.execute(
+            """INSERT INTO published_posts
+               (id, scheduled_post_id, content_id, tiktok_post_id, status, response_data)
+               VALUES (?, ?, ?, ?, 'INITIATED', ?)""",
+            (str(uuid.uuid4()), scheduled_post_id, content_id, publish_id, json.dumps(result)),
+        )
+        db.execute("UPDATE content_plans SET status = 'PUBLISHING', updated_at = ? WHERE id = ?", (now(), content_id))
+        if scheduled_post_id:
+            db.execute("UPDATE scheduled_posts SET status = 'PUBLISHING' WHERE id = ?", (scheduled_post_id,))
+        write_notification(db, "publishing", "TikTok publishing started", content["topic"], user_id)
+    return {"status": "PUBLISHING", "publish_id": publish_id}
+
+
+def process_scheduled_posts() -> None:
+    with connection() as db:
+        due = db.execute(
+            """SELECT s.id AS scheduled_post_id, s.content_id, c.user_id
+               FROM scheduled_posts s JOIN content_plans c ON c.id = s.content_id
+               WHERE s.status = 'SCHEDULED' AND s.scheduled_at <= ? LIMIT 5""",
+            (now(),),
+        ).fetchall()
+    for item in due:
+        with connection() as db:
+            claimed = db.execute(
+                "UPDATE scheduled_posts SET status = 'PUBLISHING' WHERE id = ? AND status = 'SCHEDULED'",
+                (item["scheduled_post_id"],),
+            ).rowcount
+        if not claimed:
+            continue
+        try:
+            publish_content_for_user(item["user_id"], item["content_id"], item["scheduled_post_id"])
+        except Exception as error:
+            with connection() as db:
+                db.execute("UPDATE scheduled_posts SET status = 'FAILED' WHERE id = ?", (item["scheduled_post_id"],))
+                db.execute("UPDATE content_plans SET status = 'FAILED', updated_at = ? WHERE id = ?", (now(), item["content_id"]))
+                write_notification(db, "publishing_error", "Scheduled publishing failed", str(error), item["user_id"])
+
+
+def poll_publishing_posts() -> None:
+    with connection() as db:
+        rows = db.execute(
+            """SELECT p.id AS published_id, p.tiktok_post_id, p.content_id, p.scheduled_post_id, c.user_id,
+                      a.access_token, a.refresh_token, a.expires_at, a.id AS account_id
+               FROM published_posts p JOIN content_plans c ON c.id = p.content_id
+               JOIN tiktok_accounts a ON a.user_id = c.user_id
+               WHERE p.status IN ('INITIATED', 'PROCESSING') AND a.status = 'CONNECTED'""",
+        ).fetchall()
+    for row in rows:
+        try:
+            token = _access_token(row)
+            data = TikTokClient().publish_status(token, row["tiktok_post_id"])
+            status = str(data.get("status", "PROCESSING")).upper()
+        except Exception:
+            continue
+        if status not in ("PUBLISH_COMPLETE", "FAILED", "PUBLISH_FAILED"):
+            with connection() as db:
+                db.execute("UPDATE published_posts SET status = 'PROCESSING' WHERE id = ?", (row["published_id"],))
+            continue
+        final_status = "PUBLISHED" if status == "PUBLISH_COMPLETE" else "FAILED"
+        with connection() as db:
+            db.execute(
+                "UPDATE published_posts SET status = ?, published_at = ?, error_message = ? WHERE id = ?",
+                (final_status, now() if final_status == "PUBLISHED" else None, data.get("fail_reason"), row["published_id"]),
+            )
+            db.execute("UPDATE content_plans SET status = ?, updated_at = ? WHERE id = ?", (final_status, now(), row["content_id"]))
+            if row["scheduled_post_id"]:
+                db.execute("UPDATE scheduled_posts SET status = ? WHERE id = ?", (final_status, row["scheduled_post_id"]))
+            write_notification(
+                db,
+                "published" if final_status == "PUBLISHED" else "publishing_error",
+                "TikTok post published" if final_status == "PUBLISHED" else "TikTok publishing failed",
+                row["content_id"] if final_status == "PUBLISHED" else str(data.get("fail_reason", "TikTok rejected the post")),
+                row["user_id"],
+            )
+
+
+def scheduler_loop() -> None:
+    while True:
+        try:
+            process_scheduled_posts()
+            poll_publishing_posts()
+        except Exception:
+            pass
+        time.sleep(20)
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "PhoenixAutopilot/0.1"
 
@@ -274,6 +493,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         self.pending_headers = {}
         parsed = urlsplit(self.path)
+        if parsed.path.startswith("/media/"):
+            self._serve_media(parsed.path)
+            return
         if parsed.path == "/" or not parsed.path.startswith("/api/"):
             self._serve_static(parsed.path)
             return
@@ -292,6 +514,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self) -> None:
         # TikTok's property verifier may probe with HEAD; serve headers only.
         parsed = urlsplit(self.path)
+        if parsed.path.startswith("/media/"):
+            candidate = self._media_candidate(parsed.path)
+            if candidate:
+                self._send_static_headers(candidate, HTTPStatus.OK)
+            else:
+                self._send_static_headers(STATIC / "404.html", HTTPStatus.NOT_FOUND)
+            return
         if parsed.path == "/" or not parsed.path.startswith("/api/"):
             candidate = self._static_candidate(parsed.path)
             if candidate and candidate.is_file():
@@ -351,6 +580,26 @@ class Handler(BaseHTTPRequestHandler):
         if not candidate.is_file():
             return None
         return candidate
+
+    def _media_candidate(self, path: str) -> pathlib.Path | None:
+        relative = unquote(path.removeprefix("/media/"))
+        candidate = (MEDIA_ROOT / relative).resolve()
+        if MEDIA_ROOT not in candidate.parents or not candidate.is_file():
+            return None
+        return candidate
+
+    def _serve_media(self, path: str) -> None:
+        candidate = self._media_candidate(path)
+        if not candidate:
+            self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+            return
+        body = candidate.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "video/mp4")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "public, max-age=3600")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_POST(self) -> None:
         self.pending_headers = {}
@@ -467,9 +716,12 @@ class Handler(BaseHTTPRequestHandler):
             user = self._require_user()
             with connection() as db:
                 rows = db.execute(
-                    """SELECT c.*, MAX(s.scheduled_at) AS scheduled_at
-                       FROM content_plans c LEFT JOIN scheduled_posts s ON s.content_id = c.id
-                       WHERE c.user_id = ? GROUP BY c.id ORDER BY c.created_at DESC LIMIT 50""",
+                    """SELECT c.*,
+                              (SELECT v.storage_url FROM videos v WHERE v.content_id = c.id ORDER BY v.created_at DESC LIMIT 1) AS video_url,
+                              (SELECT v.render_status FROM videos v WHERE v.content_id = c.id ORDER BY v.created_at DESC LIMIT 1) AS render_status,
+                              (SELECT MAX(s.scheduled_at) FROM scheduled_posts s WHERE s.content_id = c.id AND s.status = 'SCHEDULED') AS scheduled_at
+                       FROM content_plans c
+                       WHERE c.user_id = ? ORDER BY c.created_at DESC LIMIT 50""",
                     (user["id"],),
                 ).fetchall()
             return {"items": [plan_payload(row) for row in rows]}, HTTPStatus.OK
@@ -519,6 +771,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._oauth_start(), HTTPStatus.OK
         if path == "/api/tiktok/disconnect":
             return self._disconnect_tiktok(), HTTPStatus.OK
+        if path.startswith("/api/content/") and path.endswith("/publish"):
+            content_id = path.removeprefix("/api/content/").removesuffix("/publish")
+            user = self._require_user()
+            return publish_content_for_user(user["id"], content_id), HTTPStatus.ACCEPTED
         if path.startswith("/api/content/") and path.endswith("/status"):
             content_id = path.removeprefix("/api/content/").removesuffix("/status")
             return self._update_status(content_id, body), HTTPStatus.OK
@@ -723,6 +979,14 @@ class Handler(BaseHTTPRequestHandler):
         if not content_id or not scheduled_at:
             raise ValueError("content_id and scheduled_at are required")
         timezone_name = str(body.get("timezone", "UTC"))
+        with connection() as db:
+            account = db.execute(
+                "SELECT 1 FROM tiktok_accounts WHERE user_id = ? AND status = 'CONNECTED' LIMIT 1",
+                (user["id"],),
+            ).fetchone()
+        if not account:
+            raise TikTokConfigurationError("Connect a TikTok account before scheduling a post.")
+        render_content_for_user(user["id"], content_id)
         schedule_id = str(uuid.uuid4())
         with connection() as db:
             content = db.execute(
@@ -840,14 +1104,17 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             db.execute(
                 """INSERT INTO tiktok_accounts
-                   (id, user_id, open_id, access_token, refresh_token, scopes, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 'CONNECTED', ?, ?)""",
+                   (id, user_id, open_id, access_token, refresh_token, expires_at, refresh_expires_at,
+                    scopes, status, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONNECTED', ?, ?)""",
                 (
                     str(uuid.uuid4()),
                     user_id,
                     token_data.get("open_id"),
                     token_data.get("access_token"),
                     token_data.get("refresh_token"),
+                    _expiry_from_seconds(token_data.get("expires_in")),
+                    _expiry_from_seconds(token_data.get("refresh_expires_in")),
                     json.dumps(token_data.get("scope", "").split()),
                     timestamp,
                     timestamp,
@@ -885,6 +1152,7 @@ class Handler(BaseHTTPRequestHandler):
             ".js": "text/javascript; charset=utf-8",
             ".svg": "image/svg+xml",
             ".txt": "text/plain; charset=utf-8",
+            ".mp4": "video/mp4",
         }.get(candidate.suffix, "application/octet-stream")
         body = candidate.read_bytes()
         self.send_response(status)
@@ -901,6 +1169,7 @@ class Handler(BaseHTTPRequestHandler):
             ".js": "text/javascript; charset=utf-8",
             ".svg": "image/svg+xml",
             ".txt": "text/plain; charset=utf-8",
+            ".mp4": "video/mp4",
         }.get(candidate.suffix, "application/octet-stream")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
@@ -922,6 +1191,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     initialise()
+    threading.Thread(target=scheduler_loop, name="phoenix-publisher", daemon=True).start()
     host = os.getenv("PHOENIX_HOST", "127.0.0.1")
     port = int(os.getenv("PHOENIX_PORT", "8000"))
     server = ThreadingHTTPServer((host, port), Handler)

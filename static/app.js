@@ -70,8 +70,9 @@ function contentDetail(item) {
   const sources = item.sources || [];
   const sourceMarkup = sources.length ? `<div class="detail-sources">${sources.map((source) => `<a href="${escapeHtml(safeUrl(source.url))}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(source.provider || 'Source')}</span><strong>${escapeHtml(source.title || source.url)}</strong></a>`).join('')}</div>` : '<p class="detail-empty">No research sources were attached to this plan.</p>';
   const reviewAction = item.status === 'WAITING_APPROVAL' ? `<div class="detail-actions"><button class="button button-primary" data-approve-content="${escapeHtml(item.id)}">Approve for publishing</button><span>Approval moves this plan to your ready-to-publish work.</span></div>` : '';
-  const scheduleAction = item.status === 'READY' ? `<div class="detail-actions schedule-actions"><div><strong>Manual publishing</strong><span>Schedule this approved post now. Direct TikTok publishing needs a rendered video, which is not available yet.</span></div><input type="datetime-local" aria-label="Schedule post time" /><button class="button button-primary" data-schedule-content="${escapeHtml(item.id)}">Schedule post</button></div>` : '';
-  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${item.status === 'READY' ? 'ready' : ''}">${formatName(item.status)}</span></div>${reviewAction}${scheduleAction}<div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
+  const publishAction = item.status === 'READY' ? `<div class="detail-actions publish-actions"><div><strong>Publish now</strong><span>Render this post and send it to the connected TikTok account immediately.</span></div><button class="button button-primary" data-publish-content="${escapeHtml(item.id)}">Publish now</button></div>` : '';
+  const scheduleAction = item.status === 'READY' ? `<div class="detail-actions schedule-actions"><div><strong>Schedule publishing</strong><span>Choose a time. Phoenix renders the video and sends it to TikTok when the schedule is due.</span></div><input type="datetime-local" aria-label="Schedule post time" /><button class="button button-primary" data-schedule-content="${escapeHtml(item.id)}">Schedule post</button></div>` : '';
+  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${item.status === 'READY' ? 'ready' : ''}">${formatName(item.status)}</span></div>${reviewAction}${publishAction}${scheduleAction}<div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
 }
 
 function openContentDetail(id) {
@@ -110,13 +111,16 @@ function renderReview() {
 }
 
 function renderQueue() {
-  const queue = state.content.filter((item) => ['READY', 'SCHEDULED'].includes(item.status));
+  const queue = state.content.filter((item) => ['READY', 'SCHEDULED', 'PUBLISHING'].includes(item.status));
   const scheduled = queue.filter((item) => item.status === 'SCHEDULED');
   const ready = queue.filter((item) => item.status === 'READY');
-  $('#queue-count').textContent = `${scheduled.length} scheduled · ${ready.length} ready`;
+  const publishing = queue.filter((item) => item.status === 'PUBLISHING');
+  $('#queue-count').textContent = `${scheduled.length} scheduled · ${ready.length} ready · ${publishing.length} publishing`;
   $('#queue-content').innerHTML = queue.length ? queue.map((item) => {
     const isScheduled = item.status === 'SCHEDULED';
-    return `<div class="queue-row"><div><strong>${escapeHtml(item.topic)}</strong><span>${formatName(item.format)}</span></div><span>${isScheduled ? formatDate(item.scheduled_at) : 'Choose a time'}</span><div class="queue-row-action"><span class="content-status ${isScheduled ? 'ready' : ''}">${isScheduled ? 'Scheduled' : 'Ready to publish'}</span>${isScheduled ? '' : `<button class="queue-action" type="button" data-content-id="${escapeHtml(item.id)}">Schedule</button>`}</div></div>`;
+    const isPublishing = item.status === 'PUBLISHING';
+    const label = isScheduled ? 'Scheduled' : isPublishing ? 'Publishing now' : 'Ready to publish';
+    return `<div class="queue-row"><div><strong>${escapeHtml(item.topic)}</strong><span>${formatName(item.format)}</span></div><span>${isScheduled ? formatDate(item.scheduled_at) : isPublishing ? 'Sending to TikTok' : 'Choose a time'}</span><div class="queue-row-action"><span class="content-status ${isScheduled || isPublishing ? 'ready' : ''}">${label}</span>${isScheduled || isPublishing ? '' : `<button class="queue-action" type="button" data-content-id="${escapeHtml(item.id)}">Schedule</button>`}</div></div>`;
   }).join('') : '<div class="empty-state">Nothing is ready or scheduled yet. Approve a plan to add it here.</div>';
 }
 
@@ -216,13 +220,20 @@ async function scheduleContent(button) {
   } catch (error) { showToast(error.message); }
 }
 
+async function publishContent(id) {
+  try {
+    await request(`/api/content/${encodeURIComponent(id)}/publish`, { method:'POST', body:'{}' });
+    closeContentDetail(); showToast('Video sent to TikTok; checking publishing status'); await load(); switchView('calendar');
+  } catch (error) { showToast(error.message); }
+}
+
 $$('.nav-item').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
 $$('[data-view]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
 $('#sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
 ['#open-generate','#open-generate-secondary','#open-generate-studio','#open-generate-review','#open-generate-calendar'].forEach((selector) => $(selector)?.addEventListener('click', openModal));
 $('#close-generate').addEventListener('click', closeModal); $('#generate-modal').addEventListener('click', (event) => { if (event.target.id === 'generate-modal') closeModal(); });
 $('#close-content-detail').addEventListener('click', closeContentDetail); $('#content-detail-modal').addEventListener('click', (event) => { if (event.target.id === 'content-detail-modal') closeContentDetail(); });
-document.addEventListener('click', (event) => { const approval = event.target.closest('[data-approve-content]'); if (approval) { approveContent(approval.dataset.approveContent); return; } const schedule = event.target.closest('[data-schedule-content]'); if (schedule) { scheduleContent(schedule); return; } const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
+document.addEventListener('click', (event) => { const approval = event.target.closest('[data-approve-content]'); if (approval) { approveContent(approval.dataset.approveContent); return; } const publish = event.target.closest('[data-publish-content]'); if (publish) { publishContent(publish.dataset.publishContent); return; } const schedule = event.target.closest('[data-schedule-content]'); if (schedule) { scheduleContent(schedule); return; } const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModal(); closeContentDetail(); } });
 $('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', manageTikTok);
 $('#logout').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST', body:'{}' }); window.location.href = '/'; });
