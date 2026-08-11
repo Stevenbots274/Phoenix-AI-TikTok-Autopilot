@@ -107,7 +107,7 @@ function renderStudio() { $('#studio-content').innerHTML = state.content.length 
 
 function renderReview() {
   const review = state.content.filter((item) => item.status === 'WAITING_APPROVAL');
-  $('#review-content').innerHTML = review.length ? review.map(contentCard).join('') : emptyContent('Nothing is waiting for review. Generate a plan in approval mode to see it here.');
+  $('#review-content').innerHTML = review.length ? review.map(contentCard).join('') : emptyContent(state.dashboard?.approval_mode === 'automatic' ? 'Automatic publishing is active. New posts go straight to the Publishing queue.' : 'Nothing is waiting for review. Generate a plan in approval mode to see it here.');
 }
 
 function renderQueue() {
@@ -180,8 +180,8 @@ async function generate(event) {
   event.preventDefault(); const form = event.currentTarget; const formData = new FormData(form); const button = $('#generate-label'); const spinner = $('#generate-spinner');
   button.classList.add('hidden'); spinner.classList.remove('hidden');
   try {
-    await request('/api/content/generate', { method:'POST', body: JSON.stringify({ topic:formData.get('topic'), niche:formData.get('niche'), format:formData.get('format'), duration_seconds:Number(formData.get('duration_seconds')), research:formData.get('research') === 'on' }) });
-    closeModal(); form.reset(); showToast('Content plan created'); await load(); switchView('studio');
+    const result = await request('/api/content/generate', { method:'POST', body: JSON.stringify({ topic:formData.get('topic'), niche:formData.get('niche'), format:formData.get('format'), duration_seconds:Number(formData.get('duration_seconds')), research:formData.get('research') === 'on' }) });
+    closeModal(); form.reset(); showToast(result.item?.status === 'SCHEDULED' ? 'Video queued for automatic TikTok publishing' : 'Content plan created'); await load(); switchView(result.item?.status === 'SCHEDULED' ? 'calendar' : 'studio');
   } catch (error) { showToast(error.message); } finally { button.classList.remove('hidden'); spinner.classList.add('hidden'); }
 }
 
