@@ -25,6 +25,7 @@ function showToast(message) {
 function setSidebarCollapsed(collapsed) {
   const sidebar = $('.sidebar'); const toggle = $('#sidebar-toggle');
   sidebar.classList.toggle('collapsed', collapsed);
+  sidebar.classList.toggle('expanded', !collapsed);
   toggle.setAttribute('aria-expanded', String(!collapsed));
   toggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
   toggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
