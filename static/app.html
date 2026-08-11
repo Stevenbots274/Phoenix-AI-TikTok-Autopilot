@@ -18,9 +18,10 @@
         </div>
         <div class="eyebrow nav-label">Workspace</div>
         <nav class="nav-list" aria-label="Main navigation">
-              <button class="nav-item active" data-view="dashboard" title="Overview"><span class="nav-icon">◈</span>Overview</button>
-              <button class="nav-item" data-view="studio" title="Content studio"><span class="nav-icon">✦</span>Content studio</button>
-              <button class="nav-item" data-view="calendar" title="Publishing queue"><span class="nav-icon">▦</span>Publishing queue</button>
+               <button class="nav-item active" data-view="dashboard" title="Overview"><span class="nav-icon">◈</span>Overview</button>
+               <button class="nav-item" data-view="studio" title="Content studio"><span class="nav-icon">✦</span>Content studio</button>
+               <button class="nav-item" data-view="review" title="Review queue"><span class="nav-icon">✓</span>Review queue</button>
+               <button class="nav-item" data-view="calendar" title="Publishing queue"><span class="nav-icon">▦</span>Publishing queue</button>
               <button class="nav-item" data-view="settings" title="Settings"><span class="nav-icon">⚙</span>Settings</button>
         </nav>
         <div class="sidebar-spacer"></div>
@@ -43,7 +44,7 @@
           <div class="stats-grid">
             <article class="stat-card accent"><div class="stat-head"><span>Automation</span><span class="stat-icon">◉</span></div><strong id="stat-automation">Paused</strong><div class="stat-meta"><span class="pulse"></span><span id="stat-automation-meta">Ready to configure</span></div></article>
             <article class="stat-card"><div class="stat-head"><span>Scheduled posts</span><span class="stat-icon">◷</span></div><strong id="stat-scheduled">0</strong><div class="stat-meta">Across your queue</div></article>
-            <article class="stat-card"><div class="stat-head"><span>Ready to publish</span><span class="stat-icon">✦</span></div><strong id="stat-ready">0</strong><div class="stat-meta">Waiting for your review</div></article>
+             <article class="stat-card"><div class="stat-head"><span>Needs review</span><span class="stat-icon">✓</span></div><strong id="stat-review">0</strong><div class="stat-meta">Waiting for your approval</div></article>
             <article class="stat-card"><div class="stat-head"><span>Published</span><span class="stat-icon">↗</span></div><strong id="stat-published">0</strong><div class="stat-meta">Your content history</div></article>
           </div>
 
@@ -57,10 +58,12 @@
             <article class="next-panel"><div class="panel-heading"><span>Next in queue</span><span class="live-pill"><span class="status-dot"></span>Live view</span></div><div class="next-empty" id="next-post"><div class="empty-orb">✦</div><strong>No post scheduled yet</strong><p>Create your first content plan and schedule it here.</p><button class="button button-outline" id="open-generate-secondary">Generate a plan</button></div></article>
           </div>
 
-          <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Content library</div><h2>Recent plans</h2></div><button class="text-button" data-view="studio">Open studio →</button></div><div class="content-grid" id="recent-content"></div></section>
+           <section class="content-section"><div class="section-heading"><div><div class="eyebrow">Content library</div><h2>Recent plans</h2></div><div class="section-actions"><button class="text-button" data-view="review">Review queue <span id="review-link-count">0</span></button><button class="text-button" data-view="studio">Open studio →</button></div></div><div class="content-grid" id="recent-content"></div></section>
         </section>
 
         <section class="view hidden" id="view-studio"><div class="section-heading"><div><div class="eyebrow">Content studio</div><h2>Shape the next post</h2></div><button class="button button-primary" id="open-generate-studio">Create content <span>+</span></button></div><div class="studio-layout"><div class="studio-intro"><div class="studio-glow">✦</div><h2>From a thought<br />to a <em>publishable</em> post.</h2><p>Phoenix picks the right format for the idea instead of forcing every story into the same template.</p><div class="format-list"><span>Voice video</span><span>Music video</span><span>Slideshow</span><span>Silent video</span></div></div><div class="studio-list"><div class="eyebrow">Your latest work</div><div id="studio-content"></div></div></div></section>
+
+        <section class="view hidden" id="view-review"><div class="section-heading"><div><div class="eyebrow">Human review</div><h2>Approve the next post</h2></div><button class="button button-primary" id="open-generate-review">Create content <span>+</span></button></div><div class="review-intro"><strong>Review before publishing</strong><span>Open a plan to read the script, check the sources, and approve it when it is ready for your queue.</span></div><div class="studio-list review-list"><div class="eyebrow">Waiting for your approval</div><div id="review-content"></div></div></section>
 
         <section class="view hidden" id="view-calendar"><div class="section-heading"><div><div class="eyebrow">Publishing queue</div><h2>Schedule with intention</h2></div><button class="button button-primary" id="open-generate-calendar">Create content <span>+</span></button></div><div class="queue-panel"><div class="queue-header"><span>Planned content</span><span id="queue-count">0 posts</span></div><div id="queue-content" class="queue-list"></div></div></section>
 

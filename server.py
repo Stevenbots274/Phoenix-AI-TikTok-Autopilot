@@ -604,7 +604,11 @@ class Handler(BaseHTTPRequestHandler):
                     (user["id"],),
                 ).fetchone()[0],
                 "ready": db.execute(
-                    "SELECT COUNT(*) FROM content_plans WHERE user_id = ? AND status IN ('READY', 'WAITING_APPROVAL')",
+                    "SELECT COUNT(*) FROM content_plans WHERE user_id = ? AND status = 'READY'",
+                    (user["id"],),
+                ).fetchone()[0],
+                "review": db.execute(
+                    "SELECT COUNT(*) FROM content_plans WHERE user_id = ? AND status = 'WAITING_APPROVAL'",
                     (user["id"],),
                 ).fetchone()[0],
                 "published": db.execute(

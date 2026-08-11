@@ -48,8 +48,9 @@ function initSidebar() {
 }
 
 function contentCard(item) {
-  const ready = ['READY', 'WAITING_APPROVAL'].includes(item.status);
-  return `<article class="content-card"><div class="content-card-top"><span class="format-label">${formatName(item.format)}</span><span class="content-status ${ready ? 'ready' : ''}">${formatName(item.status)}</span></div><h3>${escapeHtml(item.topic)}</h3><p>${escapeHtml(item.hook)}</p><div class="content-footer"><span>${formatDate(item.created_at)}</span><span>${item.duration_seconds}s</span></div><button class="content-card-open" type="button" data-content-id="${escapeHtml(item.id)}">Read full plan <span>→</span></button></article>`;
+  const ready = item.status === 'READY';
+  const action = item.status === 'WAITING_APPROVAL' ? 'Review & approve' : 'Read full plan';
+  return `<article class="content-card"><div class="content-card-top"><span class="format-label">${formatName(item.format)}</span><span class="content-status ${ready ? 'ready' : ''}">${formatName(item.status)}</span></div><h3>${escapeHtml(item.topic)}</h3><p>${escapeHtml(item.hook)}</p><div class="content-footer"><span>${formatDate(item.created_at)}</span><span>${item.duration_seconds}s</span></div><button class="content-card-open" type="button" data-content-id="${escapeHtml(item.id)}">${action} <span>→</span></button></article>`;
 }
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char])); }
@@ -68,7 +69,8 @@ function detailList(items, emptyMessage) {
 function contentDetail(item) {
   const sources = item.sources || [];
   const sourceMarkup = sources.length ? `<div class="detail-sources">${sources.map((source) => `<a href="${escapeHtml(safeUrl(source.url))}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(source.provider || 'Source')}</span><strong>${escapeHtml(source.title || source.url)}</strong></a>`).join('')}</div>` : '<p class="detail-empty">No research sources were attached to this plan.</p>';
-  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${['READY', 'WAITING_APPROVAL'].includes(item.status) ? 'ready' : ''}">${formatName(item.status)}</span></div><div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
+  const reviewAction = item.status === 'WAITING_APPROVAL' ? `<div class="detail-actions"><button class="button button-primary" data-approve-content="${escapeHtml(item.id)}">Approve for publishing</button><span>Approval moves this plan to your ready-to-publish work.</span></div>` : '';
+  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${item.status === 'READY' ? 'ready' : ''}">${formatName(item.status)}</span></div>${reviewAction}<div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
 }
 
 function openContentDetail(id) {
@@ -87,7 +89,8 @@ function renderDashboard() {
   $('#stat-automation').textContent = active ? 'Active' : 'Paused';
   $('#stat-automation-meta').textContent = active ? 'Generating on schedule' : 'Ready to configure';
   $('#stat-scheduled').textContent = counts.scheduled;
-  $('#stat-ready').textContent = counts.ready;
+  $('#stat-review').textContent = counts.review;
+  $('#review-link-count').textContent = counts.review;
   $('#stat-published').textContent = counts.published;
   $('#automation-toggle').checked = active;
   $('#automation-title').textContent = active ? 'Your studio is in motion.' : 'Your studio is waiting.';
@@ -99,6 +102,11 @@ function renderDashboard() {
 }
 
 function renderStudio() { $('#studio-content').innerHTML = state.content.length ? state.content.map(contentCard).join('') : emptyContent('Generate a plan to start your studio.'); }
+
+function renderReview() {
+  const review = state.content.filter((item) => item.status === 'WAITING_APPROVAL');
+  $('#review-content').innerHTML = review.length ? review.map(contentCard).join('') : emptyContent('Nothing is waiting for review. Generate a plan in approval mode to see it here.');
+}
 
 function renderQueue() {
   const scheduled = state.content.filter((item) => item.status === 'SCHEDULED');
@@ -121,7 +129,7 @@ async function load() {
     request('/api/dashboard'), request('/api/content'), request('/api/settings'), request('/api/tiktok/status'), request('/api/notifications'),
   ]);
   state.dashboard = dashboard; state.content = content.items; state.settings = settings;
-  renderDashboard(); renderStudio(); renderQueue(); renderSettings(settings); renderTikTok(tiktok);
+  renderDashboard(); renderStudio(); renderReview(); renderQueue(); renderSettings(settings); renderTikTok(tiktok);
   $('#notification-count').style.display = notifications.items.some((item) => !item.read_at) ? 'block' : 'none';
 }
 
@@ -149,8 +157,8 @@ function renderTikTok(data) {
 function switchView(view) {
   $$('.view').forEach((item) => item.classList.toggle('hidden', item.id !== `view-${view}`));
   $$('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === view));
-  const title = { dashboard:`Good morning, ${state.user?.display_name || 'Creator'}`, studio:'Content studio', calendar:'Publishing queue', settings:'Workspace settings' }[view];
-  const kicker = { dashboard:'Workspace overview', studio:'Create and refine', calendar:'Plan ahead', settings:'Make it yours' }[view];
+  const title = { dashboard:`Good morning, ${state.user?.display_name || 'Creator'}`, studio:'Content studio', review:'Review queue', calendar:'Publishing queue', settings:'Workspace settings' }[view];
+  const kicker = { dashboard:'Workspace overview', studio:'Create and refine', review:'Human review', calendar:'Plan ahead', settings:'Make it yours' }[view];
   $('#page-title').textContent = title; $('#page-kicker').textContent = kicker;
 }
 
@@ -179,13 +187,20 @@ async function connectTikTok() {
   try { const data = await request('/api/tiktok/oauth/start', { method:'POST', body:'{}' }); window.location.href = data.url; } catch (error) { showToast('TikTok setup needs developer credentials first'); }
 }
 
+async function approveContent(id) {
+  try {
+    await request(`/api/content/${encodeURIComponent(id)}/status`, { method:'POST', body:JSON.stringify({ status:'READY' }) });
+    closeContentDetail(); showToast('Content approved and ready to publish'); await load(); switchView('review');
+  } catch (error) { showToast(error.message); }
+}
+
 $$('.nav-item').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
 $$('[data-view]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
 $('#sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
-['#open-generate','#open-generate-secondary','#open-generate-studio','#open-generate-calendar'].forEach((selector) => $(selector)?.addEventListener('click', openModal));
+['#open-generate','#open-generate-secondary','#open-generate-studio','#open-generate-review','#open-generate-calendar'].forEach((selector) => $(selector)?.addEventListener('click', openModal));
 $('#close-generate').addEventListener('click', closeModal); $('#generate-modal').addEventListener('click', (event) => { if (event.target.id === 'generate-modal') closeModal(); });
 $('#close-content-detail').addEventListener('click', closeContentDetail); $('#content-detail-modal').addEventListener('click', (event) => { if (event.target.id === 'content-detail-modal') closeContentDetail(); });
-document.addEventListener('click', (event) => { const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
+document.addEventListener('click', (event) => { const approval = event.target.closest('[data-approve-content]'); if (approval) { approveContent(approval.dataset.approveContent); return; } const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModal(); closeContentDetail(); } });
 $('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', connectTikTok);
 $('#logout').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST', body:'{}' }); window.location.href = '/'; });
