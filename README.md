@@ -35,6 +35,7 @@ Open `http://127.0.0.1:8000`. Copy `.env.example` to `.env` only when enabling p
 - `/signup` creates an account immediately; email verification is intentionally not required
 - `/login` signs in to the protected workspace
 - `/app` is the authenticated dashboard
+- `/about`, `/help`, `/contact`, `/security`, and `/cookies` are public company, support, trust, and policy pages
 - `/terms` and `/privacy` are public legal pages for the TikTok developer app
 
 Passwords are stored as salted scrypt hashes. Sessions use HttpOnly cookies, and content records are scoped to the signed-in account.
