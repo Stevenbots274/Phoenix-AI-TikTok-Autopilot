@@ -5,6 +5,9 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL DEFAULT 'Creator',
   status TEXT NOT NULL DEFAULT 'ACTIVE',
   email_verified INTEGER NOT NULL DEFAULT 1,
+  verification_token_hash TEXT,
+  verification_expires_at TIMESTAMPTZ,
+  email_verified_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

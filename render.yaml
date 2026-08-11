@@ -35,6 +35,22 @@ services:
         value: https://tiktok.senseiphoenix.name.ng/api/tiktok/oauth/callback
       - key: TIKTOK_SCOPES
         value: user.info.basic,video.publish
+      - key: SMTP_HOST
+        value: smtp.zoho.com
+      - key: SMTP_PORT
+        value: 465
+      - key: SMTP_USERNAME
+        value: tiktok@senseiphoenix.name.ng
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM_EMAIL
+        value: no-reply-tiktok@senseiphoenix.name.ng
+      - key: SMTP_FROM_NAME
+        value: Phoenix Autopilot
+      - key: SUPPORT_EMAIL
+        value: support.tiktok@senseiphoenix.name.ng
+      - key: PRIVACY_EMAIL
+        value: privacy.tiktok@senseiphoenix.name.ng
       - key: PHOENIX_AI_ENDPOINT
         value: https://combined-alidia-suhailtechlnfo-01b0509f.koyeb.app
       - key: PHOENIX_AI_API_KEY

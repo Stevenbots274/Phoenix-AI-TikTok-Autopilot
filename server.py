@@ -28,6 +28,7 @@ import psycopg
 from psycopg.rows import dict_row
 
 from content_director import ContentDirector, ContentProviderError
+from mailer import MailDeliveryError, Mailer
 from media_engine import MediaEngine
 from search_manager import SearchManager, serialise_results
 from storage import MediaStorage, StorageError
@@ -207,6 +208,10 @@ def initialise() -> None:
                ON CONFLICT (id) DO NOTHING""",
             (timestamp,),
         )
+        _ensure_column(db, "users", "verification_token_hash", "TEXT")
+        _ensure_column(db, "users", "verification_expires_at", "TIMESTAMPTZ")
+        _ensure_column(db, "users", "email_verified_at", "TIMESTAMPTZ")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_users_verification ON users(verification_token_hash)")
         _ensure_column(db, "content_plans", "automation_key", "TEXT")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_automation_key "
@@ -275,6 +280,31 @@ def write_notification(
         "INSERT INTO notifications (id, user_id, kind, title, body, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         (str(uuid.uuid4()), user_id, kind, title, body, now()),
     )
+
+
+def send_user_email_async(user_id: str, template: str, context: dict) -> None:
+    def deliver() -> None:
+        try:
+            with connection() as db:
+                user = db.execute("SELECT email, display_name FROM users WHERE id = ?", (user_id,)).fetchone()
+            if not user:
+                return
+            Mailer().send_template(
+                template,
+                [user["email"]],
+                {"name": user["display_name"], **context},
+                reply_to=os.getenv("SUPPORT_EMAIL", "support.tiktok@senseiphoenix.name.ng"),
+            )
+        except Exception:
+            return
+
+    threading.Thread(target=deliver, name="phoenix-email", daemon=True).start()
+
+
+def send_verification_email(email: str, name: str, token: str) -> None:
+    base = os.getenv("PUBLIC_BASE_URL", "https://tiktok.senseiphoenix.name.ng").rstrip("/")
+    link = f"{base}/api/auth/verify?token={quote(token)}"
+    Mailer().send_template("verification", [email], {"name": name, "link": link})
 
 
 def _timezone(name: object) -> timezone | ZoneInfo:
@@ -424,12 +454,24 @@ def create_content_plan_for_user(
         )
         write_notification(db, "content_ready", "New content plan ready", plan.topic, user_id)
         row = db.execute("SELECT * FROM content_plans WHERE id = ?", (plan.id,)).fetchone()
+    send_user_email_async(
+        user_id,
+        "content_ready",
+        {"topic": plan.topic, "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app"},
+    )
     return {"item": plan_payload(row), "used_research": bool(sources), "created": True}
 
 
 def _verified_media_url(content_id: str) -> str | None:
     public_base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
     return f"{public_base}/media/{quote(content_id)}.mp4" if public_base else None
+
+
+def _tiktok_post_url(username: object, post_id: object) -> str:
+    handle = str(username or "").lstrip("@")
+    if handle and post_id:
+        return f"https://www.tiktok.com/@{quote(handle, safe='')}/video/{quote(str(post_id), safe='')}"
+    return "https://www.tiktok.com/"
 
 
 def render_content_for_user(user_id: str, content_id: str) -> dict:
@@ -567,6 +609,12 @@ def _schedule_automation_content(user_id: str, content_id: str, scheduled_at: st
             (now(), content_id),
         )
         write_notification(db, "scheduled", "Autopilot scheduled a post", content["topic"], user_id)
+        topic = content["topic"]
+    send_user_email_async(
+        user_id,
+        "post_scheduled",
+        {"topic": topic, "scheduled_at": scheduled_at, "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app"},
+    )
     return True
 
 
@@ -674,7 +722,7 @@ def _maintain_user_autopilot(user_id: str, settings: HybridRow, work_limit: int)
 def process_scheduled_posts() -> None:
     with connection() as db:
         due = db.execute(
-            """SELECT s.id AS scheduled_post_id, s.content_id, c.user_id
+            """SELECT s.id AS scheduled_post_id, s.content_id, c.user_id, c.topic
                FROM scheduled_posts s JOIN content_plans c ON c.id = s.content_id
                WHERE s.status = 'SCHEDULED' AND s.scheduled_at <= ? LIMIT 5""",
             (now(),),
@@ -694,13 +742,22 @@ def process_scheduled_posts() -> None:
                 db.execute("UPDATE scheduled_posts SET status = 'FAILED' WHERE id = ?", (item["scheduled_post_id"],))
                 db.execute("UPDATE content_plans SET status = 'FAILED', updated_at = ? WHERE id = ?", (now(), item["content_id"]))
                 write_notification(db, "publishing_error", "Scheduled publishing failed", str(error), item["user_id"])
+            send_user_email_async(
+                item["user_id"],
+                "post_failed",
+                {
+                    "topic": item["topic"],
+                    "error": str(error),
+                    "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app",
+                },
+            )
 
 
 def poll_publishing_posts() -> None:
     with connection() as db:
         rows = db.execute(
-            """SELECT p.id AS published_id, p.tiktok_post_id, p.content_id, p.scheduled_post_id, c.user_id,
-                      a.access_token, a.refresh_token, a.expires_at, a.id AS account_id
+            """SELECT p.id AS published_id, p.tiktok_post_id, p.content_id, p.scheduled_post_id, c.user_id, c.topic,
+                       a.access_token, a.refresh_token, a.expires_at, a.id AS account_id, a.username AS tiktok_username
                FROM published_posts p JOIN content_plans c ON c.id = p.content_id
                JOIN tiktok_accounts a ON a.user_id = c.user_id
                WHERE p.status IN ('INITIATED', 'PROCESSING') AND a.status = 'CONNECTED'""",
@@ -708,6 +765,18 @@ def poll_publishing_posts() -> None:
     for row in rows:
         try:
             token = _access_token(row)
+            if not row.get("tiktok_username"):
+                try:
+                    account_info = TikTokClient().user_info(token)
+                    row["tiktok_username"] = account_info.get("username") or account_info.get("display_name")
+                    if row.get("tiktok_username"):
+                        with connection() as db:
+                            db.execute(
+                                "UPDATE tiktok_accounts SET username = ?, updated_at = ? WHERE id = ?",
+                                (row["tiktok_username"], now(), row["account_id"]),
+                            )
+                except Exception:
+                    pass
             data = TikTokClient().publish_status(token, row["tiktok_post_id"])
             status = str(data.get("status", "PROCESSING")).upper()
         except Exception:
@@ -717,6 +786,8 @@ def poll_publishing_posts() -> None:
                 db.execute("UPDATE published_posts SET status = 'PROCESSING' WHERE id = ?", (row["published_id"],))
             continue
         final_status = "PUBLISHED" if status == "PUBLISH_COMPLETE" else "FAILED"
+        available_ids = data.get("publicaly_available_post_id") or data.get("publicly_available_post_id") or []
+        posted_id = available_ids[0] if isinstance(available_ids, list) and available_ids else row.get("tiktok_post_id")
         with connection() as db:
             db.execute(
                 "UPDATE published_posts SET status = ?, published_at = ?, error_message = ? WHERE id = ?",
@@ -729,9 +800,20 @@ def poll_publishing_posts() -> None:
                 db,
                 "published" if final_status == "PUBLISHED" else "publishing_error",
                 "TikTok post published" if final_status == "PUBLISHED" else "TikTok publishing failed",
-                row["content_id"] if final_status == "PUBLISHED" else str(data.get("fail_reason", "TikTok rejected the post")),
+                row["topic"] if final_status == "PUBLISHED" else str(data.get("fail_reason", "TikTok rejected the post")),
                 row["user_id"],
             )
+        send_user_email_async(
+            row["user_id"],
+            "post_published" if final_status == "PUBLISHED" else "post_failed",
+            {
+                "topic": row["topic"],
+                "tiktok_url": _tiktok_post_url(row.get("tiktok_username"), posted_id),
+                "username": row.get("tiktok_username"),
+                "error": data.get("fail_reason") or "TikTok rejected the post.",
+                "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app",
+            },
+        )
 
 
 def scheduler_loop() -> None:
@@ -877,6 +959,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": str(error)}, HTTPStatus.BAD_REQUEST, self.pending_headers)
         except TikTokConfigurationError as error:
             self._send_json({"error": str(error)}, HTTPStatus.CONFLICT, self.pending_headers)
+        except MailDeliveryError as error:
+            self._send_json({"error": str(error)}, HTTPStatus.SERVICE_UNAVAILABLE, self.pending_headers)
         except ContentProviderError as error:
             self._send_json({"error": str(error)}, HTTPStatus.SERVICE_UNAVAILABLE, self.pending_headers)
         except Exception as error:
@@ -891,7 +975,7 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             return db.execute(
                 """SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id
-                   WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'ACTIVE'""",
+                   WHERE s.token_hash = ? AND s.expires_at > ? AND u.status = 'ACTIVE' AND u.email_verified = 1""",
                 (token_hash, now()),
             ).fetchone()
 
@@ -971,6 +1055,10 @@ class Handler(BaseHTTPRequestHandler):
                 {"authenticated": bool(user), "user": public_user(user) if user else None},
                 HTTPStatus.OK,
             )
+        if path == "/api/auth/verify":
+            result = self._verify_email(query)
+            self.pending_headers["Location"] = "/login?verified=1" if result.get("verified") else "/login?verified=error"
+            return result, HTTPStatus.SEE_OTHER
         if path == "/api/dashboard":
             return self._dashboard(), HTTPStatus.OK
         if path == "/api/content":
@@ -1017,6 +1105,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._signup(body)
         if path == "/api/auth/login":
             return self._login(body)
+        if path == "/api/auth/resend-verification":
+            return self._resend_verification(body), HTTPStatus.OK
         if path == "/api/auth/logout":
             self._clear_session()
             return {"logged_out": True}, HTTPStatus.OK
@@ -1035,7 +1125,25 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith("/api/content/") and path.endswith("/publish"):
             content_id = path.removeprefix("/api/content/").removesuffix("/publish")
             user = self._require_user()
-            return publish_content_for_user(user["id"], content_id), HTTPStatus.ACCEPTED
+            try:
+                return publish_content_for_user(user["id"], content_id), HTTPStatus.ACCEPTED
+            except Exception as error:
+                with connection() as db:
+                    content = db.execute(
+                        "SELECT topic FROM content_plans WHERE id = ? AND user_id = ?",
+                        (content_id, user["id"]),
+                    ).fetchone()
+                if content:
+                    send_user_email_async(
+                        user["id"],
+                        "post_failed",
+                        {
+                            "topic": content["topic"],
+                            "error": str(error),
+                            "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app",
+                        },
+                    )
+                raise
         if path.startswith("/api/content/") and path.endswith("/status"):
             content_id = path.removeprefix("/api/content/").removesuffix("/status")
             return self._update_status(content_id, body), HTTPStatus.OK
@@ -1054,14 +1162,18 @@ class Handler(BaseHTTPRequestHandler):
             raise ValueError("Password must be at least 8 characters")
         user_id = str(uuid.uuid4())
         timestamp = now()
+        verification_token = secrets.token_urlsafe(32)
+        verification_hash = hashlib.sha256(verification_token.encode("utf-8")).hexdigest()
+        verification_expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="seconds")
         with connection() as db:
             if db.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
                 return {"error": "An account with that email already exists"}, HTTPStatus.CONFLICT
             db.execute(
                 """INSERT INTO users
-                   (id, email, password_hash, display_name, email_verified, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, 1, ?, ?)""",
-                (user_id, email, password_hash(password), display_name, timestamp, timestamp),
+                   (id, email, password_hash, display_name, email_verified, verification_token_hash,
+                    verification_expires_at, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)""",
+                (user_id, email, password_hash(password), display_name, verification_hash, verification_expires, timestamp, timestamp),
             )
             source = db.execute("SELECT * FROM profiles WHERE id = 'default'").fetchone()
             db.execute(
@@ -1079,10 +1191,13 @@ class Handler(BaseHTTPRequestHandler):
                     timestamp,
                 ),
             )
-        self._set_session(user_id)
-        with connection() as db:
-            user = db.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
-        return {"authenticated": True, "user": public_user(user)}, HTTPStatus.CREATED
+        try:
+            send_verification_email(email, display_name, verification_token)
+        except MailDeliveryError as error:
+            raise MailDeliveryError(
+                "Your account was created, but the verification email could not be sent. Contact support."
+            ) from error
+        return {"authenticated": False, "verification_required": True, "email": email}, HTTPStatus.CREATED
 
     def _login(self, body: dict) -> tuple[dict, int]:
         email = str(body.get("email", "")).strip().lower()
@@ -1091,8 +1206,50 @@ class Handler(BaseHTTPRequestHandler):
             user = db.execute("SELECT * FROM users WHERE email = ? AND status = 'ACTIVE'", (email,)).fetchone()
         if not user or not password_matches(password, user["password_hash"]):
             return {"error": "Invalid email or password"}, HTTPStatus.UNAUTHORIZED
+        if not user.get("email_verified"):
+            return {
+                "error": "Please verify your email before signing in.",
+                "verification_required": True,
+            }, HTTPStatus.FORBIDDEN
         self._set_session(user["id"])
         return {"authenticated": True, "user": public_user(user)}, HTTPStatus.OK
+
+    def _verify_email(self, query: dict) -> dict:
+        token = str(query.get("token", [""])[0])
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest() if token else ""
+        with connection() as db:
+            user = db.execute(
+                """UPDATE users SET email_verified = 1, email_verified_at = ?, verification_token_hash = NULL,
+                   verification_expires_at = NULL, updated_at = ?
+                   WHERE verification_token_hash = ? AND verification_expires_at > NOW()
+                   RETURNING id, email, display_name""",
+                (now(), now(), token_hash),
+            ).fetchone()
+        if not user:
+            return {"verified": False, "error": "This verification link is invalid or expired."}
+        send_user_email_async(user["id"], "email_verified", {"link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app"})
+        return {"verified": True}
+
+    def _resend_verification(self, body: dict) -> dict:
+        email = str(body.get("email", "")).strip().lower()
+        if not email:
+            raise ValueError("Email address is required")
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(timespec="seconds")
+        with connection() as db:
+            user = db.execute(
+                "SELECT id, email, display_name, email_verified FROM users WHERE email = ? AND status = 'ACTIVE'",
+                (email,),
+            ).fetchone()
+            if not user or user["email_verified"]:
+                return {"sent": True}
+            db.execute(
+                "UPDATE users SET verification_token_hash = ?, verification_expires_at = ?, updated_at = ? WHERE id = ?",
+                (token_hash, expires, now(), user["id"]),
+            )
+        send_verification_email(email, user["display_name"], token)
+        return {"sent": True}
 
     def _health(self) -> dict:
         try:
@@ -1109,6 +1266,7 @@ class Handler(BaseHTTPRequestHandler):
             "scheduler": "ready",
             "media": media["status"],
             "tiktok": "configured" if tiktok.configured else "not_configured",
+            "email": "configured" if Mailer().configured else "not_configured",
         }
 
     def _dashboard(self) -> dict:
@@ -1252,6 +1410,12 @@ class Handler(BaseHTTPRequestHandler):
                 (now(), content_id),
             )
             write_notification(db, "scheduled", "Post scheduled", content["topic"], user["id"])
+            topic = content["topic"]
+        send_user_email_async(
+            user["id"],
+            "post_scheduled",
+            {"topic": topic, "scheduled_at": scheduled_at, "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app"},
+        )
         return {"id": schedule_id, "content_id": content_id, "scheduled_at": scheduled_at}
 
     def _save_settings(self, body: dict) -> dict:
@@ -1316,6 +1480,11 @@ class Handler(BaseHTTPRequestHandler):
                 "Automation is now active" if enabled else "Automation is paused",
                 user["id"],
             )
+        send_user_email_async(
+            user["id"],
+            "automation",
+            {"active": enabled, "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app"},
+        )
         return {"enabled": enabled}
 
     def _tiktok_status(self) -> dict:
@@ -1351,12 +1520,19 @@ class Handler(BaseHTTPRequestHandler):
         OAUTH_STATES.pop(state, None)
         if not code:
             return {"error": query.get("error", ["TikTok authorization was cancelled"])[0]}
-        token_data = TikTokClient().exchange_code(code)
+        client = TikTokClient()
+        token_data = client.exchange_code(code)
+        try:
+            account_info = client.user_info(token_data.get("access_token"))
+        except TikTokConfigurationError:
+            account_info = {}
+        account_username = account_info.get("username") or account_info.get("display_name")
         timestamp = now()
         open_id = token_data.get("open_id")
         values = (
             user_id,
             open_id,
+            account_username,
             token_data.get("access_token"),
             token_data.get("refresh_token"),
             _expiry_from_seconds(token_data.get("expires_in")),
@@ -1376,7 +1552,7 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if existing:
                 db.execute(
-                    """UPDATE tiktok_accounts SET user_id = ?, open_id = ?, access_token = ?, refresh_token = ?,
+                    """UPDATE tiktok_accounts SET user_id = ?, open_id = ?, username = ?, access_token = ?, refresh_token = ?,
                        expires_at = ?, refresh_expires_at = ?, scopes = ?, status = 'CONNECTED', updated_at = ?
                        WHERE id = ?""",
                     (*values, existing["id"]),
@@ -1384,11 +1560,19 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 db.execute(
                     """INSERT INTO tiktok_accounts
-                       (id, user_id, open_id, access_token, refresh_token, expires_at, refresh_expires_at,
+                       (id, user_id, open_id, username, access_token, refresh_token, expires_at, refresh_expires_at,
                         scopes, status, created_at, updated_at)
                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONNECTED', ?, ?)""",
                     (str(uuid.uuid4()), *values, timestamp),
                 )
+        send_user_email_async(
+            user_id,
+            "tiktok_connected",
+            {
+                "username": account_username or "your TikTok account",
+                "link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app",
+            },
+        )
         return {"connected": True}
 
     def _disconnect_tiktok(self) -> dict:
@@ -1398,6 +1582,11 @@ class Handler(BaseHTTPRequestHandler):
                 "UPDATE tiktok_accounts SET status = 'DISCONNECTED', updated_at = ? WHERE user_id = ?",
                 (now(), user["id"]),
             )
+        send_user_email_async(
+            user["id"],
+            "tiktok_disconnected",
+            {"link": f"{os.getenv('PUBLIC_BASE_URL', '').rstrip('/')}/app"},
+        )
         return {"connected": False}
 
     def _read_notification(self, notification_id: str) -> dict:

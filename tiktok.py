@@ -16,6 +16,7 @@ class TikTokConfigurationError(RuntimeError):
 class TikTokClient:
     authorize_url = "https://www.tiktok.com/v2/auth/authorize/"
     token_url = "https://open.tiktokapis.com/v2/oauth/token/"
+    user_info_url = "https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name,username"
     creator_info_url = "https://open.tiktokapis.com/v2/post/publish/creator_info/query/"
     publish_url = "https://open.tiktokapis.com/v2/post/publish/video/init/"
     publish_status_url = "https://open.tiktokapis.com/v2/post/publish/status/fetch/"
@@ -84,6 +85,18 @@ class TikTokClient:
             self.token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
         return self._json_request(request, 15)
+
+    def user_info(self, access_token: str) -> dict:
+        if not access_token:
+            raise TikTokConfigurationError("A TikTok access token is required.")
+        request = urllib.request.Request(
+            self.user_info_url,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        data = self._json_request(request, 15)
+        if data.get("error", {}).get("code") not in (None, "ok"):
+            raise TikTokConfigurationError(data["error"].get("message", "TikTok user details failed"))
+        return data.get("data", data).get("user", data.get("data", data))
 
     def initialize_video_post(self, access_token: str, video_url: str, caption: str) -> dict:
         """Initialize a pull-from-URL post; the URL must be publicly reachable by TikTok."""

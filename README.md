@@ -32,13 +32,17 @@ Open `http://127.0.0.1:8000`. Copy `.env.example` to `.env` only when enabling p
 ## Public Pages and Authentication
 
 - `/` is the public landing page
-- `/signup` creates an account immediately; email verification is intentionally not required
+- `/signup` creates a pending account and sends a required email verification link
 - `/login` signs in to the protected workspace
 - `/app` is the authenticated dashboard
 - `/about`, `/help`, `/contact`, `/security`, and `/cookies` are public company, support, trust, and policy pages
 - `/terms` and `/privacy` are public legal pages for the TikTok developer app
 
 Passwords are stored as salted scrypt hashes. Sessions use HttpOnly cookies, and content records are scoped to the signed-in account.
+
+## Transactional Email
+
+Phoenix uses Zoho SMTP for account verification and workspace notifications. Set the SMTP variables in `.env.example` or Render, including the password as a secret. The sender is `no-reply-tiktok@senseiphoenix.name.ng`; support is `support.tiktok@senseiphoenix.name.ng`; privacy requests go to `privacy.tiktok@senseiphoenix.name.ng`.
 
 ## Included MVP
 
