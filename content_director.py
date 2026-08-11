@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -46,8 +47,8 @@ class ContentDirector:
             "https://combined-alidia-suhailtechlnfo-01b0509f.koyeb.app",
         ).rstrip("/")
         self.api_key = os.getenv("PHOENIX_AI_API_KEY", "")
-        self.model = os.getenv("PHOENIX_AI_MODEL", "GPT-5.6-SOL")
-        self.fallback_model = os.getenv("PHOENIX_AI_FALLBACK_MODEL", "Claude Opus 5")
+        self.model = os.getenv("PHOENIX_AI_MODEL", "gpt-5.6-sol")
+        self.fallback_model = os.getenv("PHOENIX_AI_FALLBACK_MODEL", "claude-opus-5")
         self.timeout = timeout
 
     def generate(
@@ -73,6 +74,8 @@ class ContentDirector:
         for model in (self.model, self.fallback_model):
             try:
                 return self._remote_plan(context, model)
+            except urllib.error.HTTPError as error:
+                errors.append(f"HTTP {error.code}")
             except (OSError, ValueError, KeyError, TimeoutError, json.JSONDecodeError) as error:
                 errors.append(error.__class__.__name__)
         raise ContentProviderError(
@@ -87,27 +90,34 @@ class ContentDirector:
             f"{', '.join(FORMATS)}. Keep the script suitable for the requested duration."
         )
         user = json.dumps(context)
+        prompt = f"{system}\n\nUser request:\n{user}"
         payload = json.dumps(
             {
-                "model": model,
-                "temperature": 0.7,
-                "max_tokens": 1400,
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                "model": self._router_model(model),
+                "message": prompt,
             }
         ).encode()
         request = urllib.request.Request(
-            f"{self.endpoint}/v1/chat/completions",
+            f"{self.endpoint}/chat",
             data=payload,
-            headers={"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"},
+            headers={"Content-Type": "application/json", "X-API-Key": self.api_key},
         )
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             data = json.loads(response.read().decode("utf-8"))
-        raw = data["choices"][0]["message"]["content"]
+        raw = data["response"]
         parsed = json.loads(self._strip_code_fence(raw))
         plan = self._validate(parsed, context)
         plan.sources = context["sources"]
         plan.id = str(uuid.uuid4())
         return plan
+
+    @staticmethod
+    def _router_model(model: str) -> str:
+        aliases = {
+            "GPT-5.6-SOL": "gpt-5.6-sol",
+            "Claude Opus 5": "claude-opus-5",
+        }
+        return aliases.get(model, model).strip()
 
     def _validate(self, raw: dict, context: dict) -> ContentPlan:
         selected = str(raw.get("format", "VOICE_VIDEO")).upper()
@@ -123,9 +133,19 @@ class ContentDirector:
             hook=str(raw.get("hook", "")),
             script=str(raw.get("script", "")),
             caption=str(raw.get("caption", "")),
-            hashtags=[str(item) for item in raw.get("hashtags", [])][:12],
-            visual_instructions=[str(item) for item in raw.get("visual_instructions", [])][:10],
+            hashtags=self._string_list(raw.get("hashtags"), 12),
+            visual_instructions=self._string_list(raw.get("visual_instructions"), 10),
         )
+
+    @staticmethod
+    def _string_list(value, limit: int) -> list[str]:
+        if isinstance(value, list):
+            values = value
+        elif value:
+            values = [value]
+        else:
+            values = []
+        return [str(item) for item in values][:limit]
 
     @staticmethod
     def _strip_code_fence(value: str) -> str:
