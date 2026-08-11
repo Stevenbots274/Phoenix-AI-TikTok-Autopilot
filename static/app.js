@@ -110,9 +110,14 @@ function renderReview() {
 }
 
 function renderQueue() {
-  const scheduled = state.content.filter((item) => item.status === 'SCHEDULED');
-  $('#queue-count').textContent = `${scheduled.length} post${scheduled.length === 1 ? '' : 's'}`;
-  $('#queue-content').innerHTML = scheduled.length ? scheduled.map((item) => `<div class="queue-row"><div><strong>${escapeHtml(item.topic)}</strong><span>${formatName(item.format)}</span></div><span>${formatDate(item.scheduled_at)}</span><span class="content-status ready">Scheduled</span></div>`).join('') : '<div class="empty-state">Nothing scheduled yet. Create a plan, then add it to the queue.</div>';
+  const queue = state.content.filter((item) => ['READY', 'SCHEDULED'].includes(item.status));
+  const scheduled = queue.filter((item) => item.status === 'SCHEDULED');
+  const ready = queue.filter((item) => item.status === 'READY');
+  $('#queue-count').textContent = `${scheduled.length} scheduled · ${ready.length} ready`;
+  $('#queue-content').innerHTML = queue.length ? queue.map((item) => {
+    const isScheduled = item.status === 'SCHEDULED';
+    return `<div class="queue-row"><div><strong>${escapeHtml(item.topic)}</strong><span>${formatName(item.format)}</span></div><span>${isScheduled ? formatDate(item.scheduled_at) : 'Choose a time'}</span><div class="queue-row-action"><span class="content-status ${isScheduled ? 'ready' : ''}">${isScheduled ? 'Scheduled' : 'Ready to publish'}</span>${isScheduled ? '' : `<button class="queue-action" type="button" data-content-id="${escapeHtml(item.id)}">Schedule</button>`}</div></div>`;
+  }).join('') : '<div class="empty-state">Nothing is ready or scheduled yet. Approve a plan to add it here.</div>';
 }
 
 function renderHealth(health) {
@@ -198,7 +203,7 @@ async function manageTikTok() {
 async function approveContent(id) {
   try {
     await request(`/api/content/${encodeURIComponent(id)}/status`, { method:'POST', body:JSON.stringify({ status:'READY' }) });
-    closeContentDetail(); showToast('Content approved and ready to publish'); await load(); switchView('review');
+    closeContentDetail(); showToast('Content approved and ready to publish'); await load(); switchView('calendar');
   } catch (error) { showToast(error.message); }
 }
 
