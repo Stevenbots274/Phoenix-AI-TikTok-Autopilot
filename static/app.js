@@ -22,6 +22,14 @@ function showToast(message) {
   window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => toast.classList.add('hidden'), 3200);
 }
 
+function handleTikTokResult() {
+  const params = new URLSearchParams(window.location.search);
+  const result = params.get('connected');
+  if (result === 'tiktok') showToast('TikTok account connected');
+  if (result === 'error') showToast(params.get('message') || 'TikTok connection was not completed');
+  if (result) window.history.replaceState({}, '', window.location.pathname);
+}
+
 function setSidebarCollapsed(collapsed) {
   const sidebar = $('.sidebar'); const toggle = $('#sidebar-toggle');
   sidebar.classList.toggle('collapsed', collapsed);
@@ -181,5 +189,6 @@ document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { 
 $('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', connectTikTok);
 $('#logout').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST', body:'{}' }); window.location.href = '/'; });
 initSidebar();
+handleTikTokResult();
 $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
 load().catch((error) => { if (error.message === 'Sign in is required') window.location.href = '/login'; else showToast(error.message); });

@@ -282,6 +282,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json(payload, status, self.pending_headers)
         except AuthError as error:
             self._send_json({"error": str(error)}, HTTPStatus.UNAUTHORIZED)
+        except TikTokConfigurationError as error:
+            message = quote(str(error), safe="")
+            self.pending_headers["Location"] = f"/app?connected=error&message={message}"
+            self._send_json({}, HTTPStatus.SEE_OTHER, self.pending_headers)
         except Exception as error:  # Keep the local server alive and expose a useful error.
             self._send_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR, self.pending_headers)
 
@@ -486,7 +490,13 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/tiktok/status":
             return self._tiktok_status(), HTTPStatus.OK
         if path == "/api/tiktok/oauth/callback":
-            return self._oauth_callback(query), HTTPStatus.OK
+            result = self._oauth_callback(query)
+            if result.get("connected"):
+                self.pending_headers["Location"] = "/app?connected=tiktok"
+            else:
+                message = quote(str(result.get("error", "TikTok connection was not completed")), safe="")
+                self.pending_headers["Location"] = f"/app?connected=error&message={message}"
+            return result, HTTPStatus.SEE_OTHER
         return {"error": "Not found"}, HTTPStatus.NOT_FOUND
 
     def _post_api(self, path: str, body: dict) -> tuple[dict, int]:
