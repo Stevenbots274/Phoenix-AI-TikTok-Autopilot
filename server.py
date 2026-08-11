@@ -1349,7 +1349,7 @@ class Handler(BaseHTTPRequestHandler):
             token_data.get("refresh_token"),
             _expiry_from_seconds(token_data.get("expires_in")),
             _expiry_from_seconds(token_data.get("refresh_expires_in")),
-            json.dumps(token_data.get("scope", "").split()),
+            json.dumps(token_data.get("scope", "").replace(",", " ").split()),
             timestamp,
         )
         with connection() as db:

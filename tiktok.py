@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -63,8 +64,7 @@ class TikTokClient:
         request = urllib.request.Request(
             self.token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            data = json.loads(response.read().decode())
+        data = self._json_request(request, 15)
         if data.get("error"):
             raise TikTokConfigurationError(data.get("error_description", data["error"]))
         return data
@@ -83,8 +83,7 @@ class TikTokClient:
         request = urllib.request.Request(
             self.token_url, data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            return json.loads(response.read().decode())
+        return self._json_request(request, 15)
 
     def initialize_video_post(self, access_token: str, video_url: str, caption: str) -> dict:
         """Initialize a pull-from-URL post; the URL must be publicly reachable by TikTok."""
@@ -108,8 +107,7 @@ class TikTokClient:
             data=payload,
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
         )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            return json.loads(response.read().decode())
+        return self._json_request(request, 20)
 
     def creator_info(self, access_token: str) -> dict:
         """Query TikTok before posting so privacy and duration follow creator settings."""
@@ -120,8 +118,7 @@ class TikTokClient:
             data=b"{}",
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            data = json.loads(response.read().decode())
+        data = self._json_request(request, 15)
         if data.get("error", {}).get("code") not in (None, "ok"):
             raise TikTokConfigurationError(data["error"].get("message", "TikTok creator settings failed"))
         return data.get("data", data)
@@ -134,8 +131,26 @@ class TikTokClient:
             data=json.dumps({"publish_id": publish_id}).encode(),
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {access_token}"},
         )
-        with urllib.request.urlopen(request, timeout=15) as response:
-            data = json.loads(response.read().decode())
+        data = self._json_request(request, 15)
         if data.get("error", {}).get("code") not in (None, "ok"):
             raise TikTokConfigurationError(data["error"].get("message", "TikTok publish status failed"))
         return data.get("data", data)
+
+    @staticmethod
+    def _json_request(request: urllib.request.Request, timeout: int) -> dict:
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return json.loads(response.read().decode())
+        except urllib.error.HTTPError as error:
+            raw = error.read().decode("utf-8", "replace")
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {}
+            detail = payload.get("error", {}) if isinstance(payload, dict) else {}
+            if isinstance(detail, dict):
+                message = detail.get("message") or detail.get("description") or detail.get("code")
+            else:
+                message = str(detail) if detail else None
+            message = message or (payload.get("message") if isinstance(payload, dict) else None) or raw[:300]
+            raise TikTokConfigurationError(f"TikTok API HTTP {error.code}: {message or 'request rejected'}") from error
