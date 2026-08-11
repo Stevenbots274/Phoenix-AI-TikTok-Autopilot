@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS users (
   verification_token_hash TEXT,
   verification_expires_at TIMESTAMPTZ,
   email_verified_at TIMESTAMPTZ,
+  reset_token_hash TEXT,
+  reset_expires_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

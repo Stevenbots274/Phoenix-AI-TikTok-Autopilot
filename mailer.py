@@ -80,6 +80,11 @@ def render_template(template: str, context: dict) -> tuple[str, str, str]:
         title = "You are verified"
         text = f"Hi {name},\n\nYour Phoenix email is verified. Open your workspace:\n{link}\n\nPhoenix Autopilot"
         body = f"<p>Hi {name},</p><p>Your email is verified and your workspace is ready.</p>{_button(link, 'Open workspace')}"
+    elif template == "password_reset":
+        subject = "Reset your Phoenix password"
+        title = "Reset your password"
+        text = f"Hi {name},\n\nReset your Phoenix password here:\n{link}\n\nThis link expires in one hour. If you did not request this, you can ignore this email.\n\nPhoenix Autopilot"
+        body = f"<p>Hi {name},</p><p>We received a request to reset your Phoenix password.</p>{_button(link, 'Reset password')}<p class=\"muted\">This link expires in one hour. If you did not request this, you can ignore this email.</p>"
     elif template == "content_ready":
         subject = f"New Phoenix post ready: {topic}"
         title = "New content is ready"

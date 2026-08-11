@@ -211,7 +211,10 @@ def initialise() -> None:
         _ensure_column(db, "users", "verification_token_hash", "TEXT")
         _ensure_column(db, "users", "verification_expires_at", "TIMESTAMPTZ")
         _ensure_column(db, "users", "email_verified_at", "TIMESTAMPTZ")
+        _ensure_column(db, "users", "reset_token_hash", "TEXT")
+        _ensure_column(db, "users", "reset_expires_at", "TIMESTAMPTZ")
         db.execute("CREATE INDEX IF NOT EXISTS idx_users_verification ON users(verification_token_hash)")
+        db.execute("CREATE INDEX IF NOT EXISTS idx_users_reset ON users(reset_token_hash)")
         _ensure_column(db, "content_plans", "automation_key", "TEXT")
         db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_automation_key "
@@ -913,6 +916,10 @@ class Handler(BaseHTTPRequestHandler):
             "/login/": "auth.html",
             "/signup": "auth.html",
             "/signup/": "auth.html",
+            "/forgot-password": "forgot-password.html",
+            "/forgot-password/": "forgot-password.html",
+            "/reset-password": "reset-password.html",
+            "/reset-password/": "reset-password.html",
         }
         relative = legal_pages.get(path, "index.html" if path in ("", "/") else path.removeprefix("/"))
         if relative.startswith("static/"):
@@ -1107,6 +1114,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._login(body)
         if path == "/api/auth/resend-verification":
             return self._resend_verification(body), HTTPStatus.OK
+        if path == "/api/auth/forgot-password":
+            return self._forgot_password(body), HTTPStatus.OK
+        if path == "/api/auth/reset-password":
+            return self._reset_password(body), HTTPStatus.OK
         if path == "/api/auth/logout":
             self._clear_session()
             return {"logged_out": True}, HTTPStatus.OK
@@ -1250,6 +1261,53 @@ class Handler(BaseHTTPRequestHandler):
             )
         send_verification_email(email, user["display_name"], token)
         return {"sent": True}
+
+    def _forgot_password(self, body: dict) -> dict:
+        email = str(body.get("email", "")).strip().lower()
+        if not email:
+            raise ValueError("Email address is required")
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        expires = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(timespec="seconds")
+        with connection() as db:
+            user = db.execute(
+                "SELECT id, email, display_name FROM users WHERE email = ? AND status = 'ACTIVE'",
+                (email,),
+            ).fetchone()
+            if not user:
+                return {"sent": True}
+            db.execute(
+                "UPDATE users SET reset_token_hash = ?, reset_expires_at = ?, updated_at = ? WHERE id = ?",
+                (token_hash, expires, now(), user["id"]),
+            )
+        base = os.getenv("PUBLIC_BASE_URL", "https://tiktok.senseiphoenix.name.ng").rstrip("/")
+        send_user_email = Mailer().send_template
+        send_user_email(
+            "password_reset",
+            [user["email"]],
+            {"name": user["display_name"], "link": f"{base}/reset-password?token={quote(token)}"},
+        )
+        return {"sent": True}
+
+    def _reset_password(self, body: dict) -> dict:
+        token = str(body.get("token", "")).strip()
+        password = str(body.get("password", ""))
+        if not token:
+            raise ValueError("Reset token is required")
+        if len(password) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with connection() as db:
+            user = db.execute(
+                """UPDATE users SET password_hash = ?, reset_token_hash = NULL, reset_expires_at = NULL, updated_at = ?
+                   WHERE reset_token_hash = ? AND reset_expires_at > NOW()
+                   RETURNING id""",
+                (password_hash(password), now(), token_hash),
+            ).fetchone()
+            if not user:
+                raise ValueError("This reset link is invalid or expired")
+            db.execute("DELETE FROM sessions WHERE user_id = ?", (user["id"],))
+        return {"reset": True}
 
     def _health(self) -> dict:
         try:
