@@ -98,6 +98,7 @@ class TikTokClient:
                     "title": caption[:150],
                     "privacy_level": privacy_level,
                     "disable_comment": False,
+                    "is_aigc": True,
                 },
                 "source_info": {"source": "PULL_FROM_URL", "video_url": video_url},
             }
