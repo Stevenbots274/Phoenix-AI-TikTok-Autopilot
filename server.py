@@ -427,6 +427,11 @@ def create_content_plan_for_user(
     return {"item": plan_payload(row), "used_research": bool(sources), "created": True}
 
 
+def _verified_media_url(content_id: str) -> str | None:
+    public_base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+    return f"{public_base}/media/{quote(content_id)}.mp4" if public_base else None
+
+
 def render_content_for_user(user_id: str, content_id: str) -> dict:
     MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
     with connection() as db:
@@ -438,8 +443,15 @@ def render_content_for_user(user_id: str, content_id: str) -> dict:
         ).fetchone()
     if not content:
         raise ValueError("Content not found")
+    output_path = MEDIA_ROOT / f"{content_id}.mp4"
     if video and video.get("render_status") == "READY" and video.get("storage_url"):
-        return dict(video)
+        verified_url = _verified_media_url(content_id) if output_path.is_file() else None
+        if verified_url and video.get("storage_url") != verified_url:
+            with connection() as db:
+                db.execute("UPDATE videos SET storage_url = ? WHERE id = ?", (verified_url, video["id"]))
+            video["storage_url"] = verified_url
+        if video.get("storage_url") == verified_url or not os.getenv("PUBLIC_BASE_URL"):
+            return dict(video)
     restore_status = content["status"] if content["status"] in ("READY", "SCHEDULED") else "READY"
     video_id = video["id"] if video else str(uuid.uuid4())
     with connection() as db:
@@ -450,7 +462,6 @@ def render_content_for_user(user_id: str, content_id: str) -> dict:
             )
         db.execute("UPDATE videos SET render_status = ? WHERE id = ?", ("RENDERING", video_id))
         db.execute("UPDATE content_plans SET status = ?, updated_at = ? WHERE id = ?", ("VIDEO_RENDERING", now(), content_id))
-    output_path = MEDIA_ROOT / f"{content_id}.mp4"
     try:
         result = MediaEngine().render(
             topic=content["topic"],
@@ -460,11 +471,12 @@ def render_content_for_user(user_id: str, content_id: str) -> dict:
             output_path=output_path,
         )
         storage_url = MediaStorage().upload(output_path, f"{user_id}/{content_id}.mp4")
+        verified_url = _verified_media_url(content_id)
+        if verified_url:
+            storage_url = verified_url
         if not storage_url:
-            public_base = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
-            if not public_base:
+            if not os.getenv("PUBLIC_BASE_URL"):
                 raise StorageError("PUBLIC_BASE_URL is required when Supabase Storage is unavailable.")
-            storage_url = f"{public_base}/media/{quote(output_path.name)}"
         with connection() as db:
             db.execute(
                 """UPDATE videos SET storage_url = ?, duration = ?, resolution = ?, file_size = ?,
