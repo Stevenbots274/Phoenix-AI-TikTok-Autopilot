@@ -22,6 +22,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import psycopg
 from psycopg.rows import dict_row
@@ -72,6 +73,8 @@ ALLOWED_STATUSES = {
     "CANCELLED",
 }
 OAUTH_STATES: dict[str, str] = {}
+AUTOPILOT_HORIZON_DAYS = 7
+AUTOPILOT_WORK_PER_CYCLE = 3
 
 
 class AuthError(RuntimeError):
@@ -200,9 +203,14 @@ def initialise() -> None:
             (timestamp, timestamp),
         )
         db.execute(
-            """INSERT INTO content_settings (id, updated_at) VALUES (1, ?)
+            """INSERT INTO content_settings (id, approval_mode, updated_at) VALUES (1, 'automatic', ?)
                ON CONFLICT (id) DO NOTHING""",
             (timestamp,),
+        )
+        _ensure_column(db, "content_plans", "automation_key", "TEXT")
+        db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_content_automation_key "
+            "ON content_plans(automation_key) WHERE automation_key IS NOT NULL"
         )
 
 
@@ -269,6 +277,27 @@ def write_notification(
     )
 
 
+def _timezone(name: object) -> timezone | ZoneInfo:
+    try:
+        return ZoneInfo(str(name or "UTC"))
+    except (ZoneInfoNotFoundError, ValueError):
+        return timezone.utc
+
+
+def _automation_key(user_id: str, target_date, slot: int) -> str:
+    return f"{user_id}:{target_date.isoformat()}:{slot}"
+
+
+def _automation_time(target_date, posting_time: object, slot: int, posts_per_day: int, tz) -> str:
+    try:
+        parsed_time = datetime.strptime(str(posting_time or "20:00"), "%H:%M").time()
+    except ValueError:
+        parsed_time = datetime.strptime("20:00", "%H:%M").time()
+    minutes_after_start = (24 * 60 * slot) // posts_per_day
+    local_time = datetime.combine(target_date, parsed_time, tzinfo=tz) + timedelta(minutes=minutes_after_start)
+    return local_time.astimezone(timezone.utc).isoformat(timespec="seconds")
+
+
 def _expiry_from_seconds(value: object) -> str | None:
     try:
         return (datetime.now(timezone.utc) + timedelta(seconds=int(value))).isoformat()
@@ -312,6 +341,90 @@ def _access_token(account: HybridRow) -> str:
             ),
         )
     return token
+
+
+def create_content_plan_for_user(
+    user_id: str,
+    *,
+    topic: str | None = None,
+    niche: str | None = None,
+    requested_format: str | None = None,
+    duration_seconds: int | None = None,
+    instructions: str | None = None,
+    research: bool = False,
+    automation_key: str | None = None,
+) -> dict:
+    with connection() as db:
+        user = db.execute("SELECT * FROM users WHERE id = ? AND status = 'ACTIVE'", (user_id,)).fetchone()
+        if not user:
+            raise ValueError("User not found")
+        profile = db.execute("SELECT * FROM profiles WHERE id = ?", (user_id,)).fetchone()
+        settings = db.execute("SELECT * FROM content_settings WHERE id = 1").fetchone()
+    if not profile:
+        raise ValueError("Creator profile not found")
+    selected_topic = str(topic or "").strip() or None
+    selected_niche = str(niche or profile["niche"]).strip() or profile["niche"]
+    selected_format = str(requested_format or settings["default_format"]).upper()
+    selected_instructions = str(
+        instructions if instructions is not None else settings["permanent_instructions"]
+    )
+    sources = SearchManager().search(selected_topic) if research and selected_topic else []
+    plan = ContentDirector().generate(
+        topic=selected_topic,
+        niche=selected_niche,
+        requested_format=selected_format,
+        duration_seconds=int(duration_seconds or settings["default_duration"]),
+        instructions=selected_instructions,
+    )
+    plan.sources = serialise_results(sources)
+    timestamp = now()
+    status = "WAITING_APPROVAL" if settings["approval_mode"] == "approval" else "READY"
+    with connection() as db:
+        result = db.execute(
+            """INSERT INTO content_plans
+               (id, user_id, automation_key, topic, niche, format, voice_required, music_required, duration_seconds,
+                hook, script, caption, hashtags, visual_instructions, status, sources, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT DO NOTHING""",
+            (
+                plan.id,
+                user_id,
+                automation_key,
+                plan.topic,
+                plan.niche,
+                plan.format,
+                int(plan.voice_required),
+                int(plan.music_required),
+                plan.duration_seconds,
+                plan.hook,
+                plan.script,
+                plan.caption,
+                json.dumps(plan.hashtags),
+                json.dumps(plan.visual_instructions),
+                status,
+                json.dumps(plan.sources),
+                timestamp,
+                timestamp,
+            ),
+        )
+        if result.rowcount == 0 and automation_key:
+            existing = db.execute(
+                "SELECT * FROM content_plans WHERE user_id = ? AND automation_key = ?",
+                (user_id, automation_key),
+            ).fetchone()
+            if existing:
+                return {"item": plan_payload(existing), "used_research": bool(sources), "created": False}
+        db.execute(
+            "INSERT INTO scripts (id, content_id, hook, body, cta, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), plan.id, plan.hook, plan.script, "Follow for more.", timestamp),
+        )
+        db.execute(
+            "INSERT INTO videos (id, content_id, duration, render_status, created_at) VALUES (?, ?, ?, ?, ?)",
+            (str(uuid.uuid4()), plan.id, plan.duration_seconds, "QUEUED", timestamp),
+        )
+        write_notification(db, "content_ready", "New content plan ready", plan.topic, user_id)
+        row = db.execute("SELECT * FROM content_plans WHERE id = ?", (plan.id,)).fetchone()
+    return {"item": plan_payload(row), "used_research": bool(sources), "created": True}
 
 
 def render_content_for_user(user_id: str, content_id: str) -> dict:
@@ -411,6 +524,116 @@ def publish_content_for_user(user_id: str, content_id: str, scheduled_post_id: s
     return {"status": "PUBLISHING", "publish_id": publish_id}
 
 
+def _schedule_automation_content(user_id: str, content_id: str, scheduled_at: str, timezone_name: str) -> bool:
+    render_content_for_user(user_id, content_id)
+    with connection() as db:
+        content = db.execute(
+            "SELECT * FROM content_plans WHERE id = ? AND user_id = ?", (content_id, user_id)
+        ).fetchone()
+        if not content or content["status"] != "READY":
+            return False
+        if db.execute(
+            "SELECT 1 FROM scheduled_posts WHERE content_id = ? AND status IN ('SCHEDULED', 'PUBLISHING', 'PUBLISHED') LIMIT 1",
+            (content_id,),
+        ).fetchone():
+            return False
+        schedule_id = str(uuid.uuid4())
+        db.execute(
+            "INSERT INTO scheduled_posts (id, content_id, scheduled_at, timezone, created_at) VALUES (?, ?, ?, ?, ?)",
+            (schedule_id, content_id, scheduled_at, timezone_name, now()),
+        )
+        db.execute(
+            "UPDATE content_plans SET status = 'SCHEDULED', updated_at = ? WHERE id = ?",
+            (now(), content_id),
+        )
+        write_notification(db, "scheduled", "Autopilot scheduled a post", content["topic"], user_id)
+    return True
+
+
+def _autopilot_error(user_id: str, error: Exception) -> None:
+    message = str(error)[:500] or error.__class__.__name__
+    with connection() as db:
+        recent = db.execute(
+            """SELECT 1 FROM notifications
+               WHERE user_id = ? AND kind = 'automation_error' AND body = ?
+                 AND created_at > NOW() - INTERVAL '1 hour' LIMIT 1""",
+            (user_id, message),
+        ).fetchone()
+        if not recent:
+            write_notification(db, "automation_error", "Autopilot needs attention", message, user_id)
+
+
+def maintain_autopilot() -> None:
+    with connection() as db:
+        settings = db.execute("SELECT * FROM content_settings WHERE id = 1").fetchone()
+        users = db.execute(
+            "SELECT id FROM users WHERE status = 'ACTIVE' ORDER BY created_at"
+        ).fetchall()
+    if not settings or not bool(settings["automation_enabled"]):
+        return
+    work_left = AUTOPILOT_WORK_PER_CYCLE
+    for user in users:
+        if work_left <= 0:
+            break
+        try:
+            work_left -= _maintain_user_autopilot(user["id"], settings, work_left)
+        except Exception as error:
+            _autopilot_error(user["id"], error)
+
+
+def _maintain_user_autopilot(user_id: str, settings: HybridRow, work_limit: int) -> int:
+    with connection() as db:
+        profile = db.execute("SELECT * FROM profiles WHERE id = ?", (user_id,)).fetchone()
+        account = db.execute(
+            "SELECT 1 FROM tiktok_accounts WHERE user_id = ? AND status = 'CONNECTED' LIMIT 1",
+            (user_id,),
+        ).fetchone()
+    if not profile:
+        return 0
+    automatic = settings["approval_mode"] == "automatic"
+    if automatic and not account:
+        raise TikTokConfigurationError("Connect a TikTok account before enabling automatic publishing.")
+    posts_per_day = max(1, min(int(settings["posts_per_day"] or 1), 10))
+    tz = _timezone(profile.get("timezone"))
+    local_today = datetime.now(tz).date()
+    work_done = 0
+    for day_offset in range(AUTOPILOT_HORIZON_DAYS):
+        target_date = local_today + timedelta(days=day_offset)
+        for slot in range(posts_per_day):
+            if work_done >= work_limit:
+                return work_done
+            key = _automation_key(user_id, target_date, slot)
+            with connection() as db:
+                row = db.execute(
+                    "SELECT * FROM content_plans WHERE user_id = ? AND automation_key = ?",
+                    (user_id, key),
+                ).fetchone()
+            scheduled_at = _automation_time(
+                target_date,
+                settings["posting_time"],
+                slot,
+                posts_per_day,
+                tz,
+            )
+            if row:
+                if automatic and row["status"] == "READY":
+                    _schedule_automation_content(user_id, row["id"], scheduled_at, str(profile["timezone"]))
+                    work_done += 1
+                continue
+            result = create_content_plan_for_user(
+                user_id,
+                instructions=(
+                    f"{settings['permanent_instructions']}\nChoose a fresh topic and do not repeat recent content."
+                ).strip(),
+                duration_seconds=settings["default_duration"],
+                automation_key=key,
+            )
+            work_done += 1
+            if automatic and result["item"]["status"] == "READY":
+                _schedule_automation_content(user_id, result["item"]["id"], scheduled_at, str(profile["timezone"]))
+    return work_done
+
+
 def process_scheduled_posts() -> None:
     with connection() as db:
         due = db.execute(
@@ -477,6 +700,7 @@ def poll_publishing_posts() -> None:
 def scheduler_loop() -> None:
     while True:
         try:
+            maintain_autopilot()
             process_scheduled_posts()
             poll_publishing_posts()
         except Exception:
@@ -905,55 +1129,15 @@ class Handler(BaseHTTPRequestHandler):
         niche = str(body.get("niche", profile["niche"])).strip() or profile["niche"]
         requested_format = str(body.get("format", settings["default_format"])).upper()
         instructions = str(body.get("instructions", settings["permanent_instructions"]))
-        sources = []
-        if body.get("research") and topic:
-            sources = SearchManager().search(topic)
-        plan = ContentDirector().generate(
+        return create_content_plan_for_user(
+            user["id"],
             topic=topic,
             niche=niche,
             requested_format=requested_format,
             duration_seconds=int(body.get("duration_seconds", settings["default_duration"])),
             instructions=instructions,
+            research=bool(body.get("research")),
         )
-        plan.sources = serialise_results(sources)
-        timestamp = now()
-        with connection() as db:
-            db.execute(
-                """INSERT INTO content_plans
-                   (id, user_id, topic, niche, format, voice_required, music_required, duration_seconds,
-                    hook, script, caption, hashtags, visual_instructions, status, sources, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    plan.id,
-                    user["id"],
-                    plan.topic,
-                    plan.niche,
-                    plan.format,
-                    int(plan.voice_required),
-                    int(plan.music_required),
-                    plan.duration_seconds,
-                    plan.hook,
-                    plan.script,
-                    plan.caption,
-                    json.dumps(plan.hashtags),
-                    json.dumps(plan.visual_instructions),
-                    "WAITING_APPROVAL" if settings["approval_mode"] == "approval" else "READY",
-                    json.dumps(plan.sources),
-                    timestamp,
-                    timestamp,
-                ),
-            )
-            db.execute(
-                "INSERT INTO scripts (id, content_id, hook, body, cta, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (str(uuid.uuid4()), plan.id, plan.hook, plan.script, "Follow for more.", timestamp),
-            )
-            db.execute(
-                "INSERT INTO videos (id, content_id, duration, render_status, created_at) VALUES (?, ?, ?, ?, ?)",
-                (str(uuid.uuid4()), plan.id, plan.duration_seconds, "QUEUED", timestamp),
-            )
-            write_notification(db, "content_ready", "New content plan ready", plan.topic, user["id"])
-            row = db.execute("SELECT * FROM content_plans WHERE id = ?", (plan.id,)).fetchone()
-        return {"item": plan_payload(row), "used_research": bool(sources)}
 
     def _update_status(self, content_id: str, body: dict) -> dict:
         user = self._require_user()
@@ -1054,8 +1238,8 @@ class Handler(BaseHTTPRequestHandler):
         enabled = bool(body.get("enabled"))
         with connection() as db:
             db.execute(
-                "UPDATE content_settings SET automation_enabled = ?, updated_at = ? WHERE id = 1",
-                (int(enabled), now()),
+                "UPDATE content_settings SET automation_enabled = ?, approval_mode = CASE WHEN ? = 1 THEN 'automatic' ELSE approval_mode END, updated_at = ? WHERE id = 1",
+                (int(enabled), int(enabled), now()),
             )
             write_notification(
                 db,

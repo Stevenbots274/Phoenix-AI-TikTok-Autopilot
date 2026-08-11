@@ -186,7 +186,7 @@ async function generate(event) {
 }
 
 async function saveSettings() {
-  const formData = new FormData($('#settings-form')); const data = Object.fromEntries(formData.entries()); data.default_duration = Number(data.default_duration);
+  const formData = new FormData($('#settings-form')); const data = Object.fromEntries(formData.entries()); data.default_duration = Number(data.default_duration); data.posts_per_day = Number(data.posts_per_day);
   try { await request('/api/settings', { method:'POST', body:JSON.stringify(data) }); showToast('Settings saved'); await load(); } catch (error) { showToast(error.message); }
 }
 

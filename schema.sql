@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS content_settings (
   permanent_instructions TEXT NOT NULL DEFAULT '',
   default_format TEXT NOT NULL DEFAULT 'AUTO',
   default_duration INTEGER NOT NULL DEFAULT 35,
-  approval_mode TEXT NOT NULL DEFAULT 'approval',
+  approval_mode TEXT NOT NULL DEFAULT 'automatic',
   posts_per_day INTEGER NOT NULL DEFAULT 1,
   posting_time TEXT NOT NULL DEFAULT '20:00',
   posting_days TEXT NOT NULL DEFAULT 'mon,tue,wed,thu,fri,sat,sun',
@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS content_settings (
 CREATE TABLE IF NOT EXISTS content_plans (
   id TEXT PRIMARY KEY,
   user_id TEXT REFERENCES users(id) ON DELETE CASCADE,
+  automation_key TEXT,
   topic TEXT NOT NULL,
   niche TEXT NOT NULL,
   format TEXT NOT NULL,
