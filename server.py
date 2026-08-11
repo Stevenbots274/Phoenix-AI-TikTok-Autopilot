@@ -309,7 +309,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
             else:
-                self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+                self._send_static_headers(STATIC / "404.html", HTTPStatus.NOT_FOUND)
         else:
             self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
 
@@ -797,7 +797,8 @@ class Handler(BaseHTTPRequestHandler):
         with connection() as db:
             account = db.execute(
                 """SELECT username, status, scopes, expires_at FROM tiktok_accounts
-                   WHERE user_id = ? ORDER BY created_at DESC LIMIT 1""",
+                   WHERE user_id = ? AND status = 'CONNECTED'
+                   ORDER BY created_at DESC LIMIT 1""",
                 (user["id"],),
             ).fetchone()
         return {
@@ -863,9 +864,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_static(self, path: str) -> None:
         candidate = self._static_candidate(path)
+        status = HTTPStatus.OK
         if candidate is None:
-            self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
-            return
+            candidate = STATIC / "404.html"
+            status = HTTPStatus.NOT_FOUND
         content_type = {
             ".html": "text/html; charset=utf-8",
             ".css": "text/css; charset=utf-8",
@@ -874,12 +876,26 @@ class Handler(BaseHTTPRequestHandler):
             ".txt": "text/plain; charset=utf-8",
         }.get(candidate.suffix, "application/octet-stream")
         body = candidate.read_bytes()
-        self.send_response(HTTPStatus.OK)
+        self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+
+    def _send_static_headers(self, candidate: pathlib.Path, status: int) -> None:
+        content_type = {
+            ".html": "text/html; charset=utf-8",
+            ".css": "text/css; charset=utf-8",
+            ".js": "text/javascript; charset=utf-8",
+            ".svg": "image/svg+xml",
+            ".txt": "text/plain; charset=utf-8",
+        }.get(candidate.suffix, "application/octet-stream")
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(candidate.stat().st_size))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
 
     def _send_json(self, payload: object, status: int, headers: dict[str, str] | None = None) -> None:
         body = json_bytes(payload)

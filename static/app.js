@@ -139,10 +139,11 @@ function renderSettings(data) {
 }
 
 function renderTikTok(data) {
-  $('#tiktok-name').textContent = data.account?.username ? `@${data.account.username}` : 'Not connected';
-  $('#tiktok-message').textContent = data.account ? 'Account connected' : data.message;
-  $('#connect-tiktok').textContent = data.account ? 'Manage account' : 'Connect TikTok';
-  $('.tiktok-card .status-dot').classList.toggle('muted', !data.account);
+  const connected = Boolean(data.account);
+  $('#tiktok-name').textContent = data.account?.username ? `@${data.account.username}` : connected ? 'Connected' : 'Not connected';
+  $('#tiktok-message').textContent = connected ? 'Account connected' : data.message;
+  $('#connect-tiktok').textContent = connected ? 'Manage account' : 'Connect TikTok';
+  $('.tiktok-card .status-dot').classList.toggle('muted', !connected);
 }
 
 function switchView(view) {
