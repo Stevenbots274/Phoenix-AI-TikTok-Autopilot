@@ -111,7 +111,8 @@ class CursorCompat:
 
 class ConnectionCompat:
     def __init__(self, url: str):
-        self.db = psycopg.connect(url, row_factory=dict_row, connect_timeout=5)
+        # Supabase poolers do not safely reuse psycopg prepared statements.
+        self.db = psycopg.connect(url, row_factory=dict_row, connect_timeout=5, prepare_threshold=None)
 
     @staticmethod
     def _translate(query: str) -> str:
