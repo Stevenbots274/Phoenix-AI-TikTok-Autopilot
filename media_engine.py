@@ -25,10 +25,10 @@ class MediaEngine:
 
     def health(self) -> dict:
         return {
-            "status": "healthy" if self.available else "not_configured",
+            "status": "not_configured",
             "engine": "ffmpeg",
             "path": self.ffmpeg,
-            "message": "Ready for rendering" if self.available else "Install FFmpeg to render videos",
+            "message": "Video rendering worker is not implemented yet" if self.available else "Install FFmpeg to render videos",
         }
 
     @staticmethod

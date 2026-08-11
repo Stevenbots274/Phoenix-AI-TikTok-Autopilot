@@ -730,6 +730,13 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not content:
                 raise ValueError("Content not found")
+            if content["status"] not in ("READY", "SCHEDULED"):
+                raise ValueError("Approve this content before scheduling it")
+            if db.execute(
+                "SELECT 1 FROM scheduled_posts WHERE content_id = ? AND status = 'SCHEDULED' LIMIT 1",
+                (content_id,),
+            ).fetchone():
+                raise ValueError("This content is already scheduled")
             db.execute(
                 "INSERT INTO scheduled_posts (id, content_id, scheduled_at, timezone, created_at) VALUES (?, ?, ?, ?, ?)",
                 (schedule_id, content_id, scheduled_at, timezone_name, now()),

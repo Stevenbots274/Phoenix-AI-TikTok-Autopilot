@@ -1,4 +1,4 @@
-const state = { dashboard: null, content: [], settings: null, user: null };
+const state = { dashboard: null, content: [], settings: null, tiktok: null, user: null };
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
@@ -70,7 +70,8 @@ function contentDetail(item) {
   const sources = item.sources || [];
   const sourceMarkup = sources.length ? `<div class="detail-sources">${sources.map((source) => `<a href="${escapeHtml(safeUrl(source.url))}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(source.provider || 'Source')}</span><strong>${escapeHtml(source.title || source.url)}</strong></a>`).join('')}</div>` : '<p class="detail-empty">No research sources were attached to this plan.</p>';
   const reviewAction = item.status === 'WAITING_APPROVAL' ? `<div class="detail-actions"><button class="button button-primary" data-approve-content="${escapeHtml(item.id)}">Approve for publishing</button><span>Approval moves this plan to your ready-to-publish work.</span></div>` : '';
-  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${item.status === 'READY' ? 'ready' : ''}">${formatName(item.status)}</span></div>${reviewAction}<div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
+  const scheduleAction = item.status === 'READY' ? `<div class="detail-actions schedule-actions"><div><strong>Manual publishing</strong><span>Schedule this approved post now. Direct TikTok publishing needs a rendered video, which is not available yet.</span></div><input type="datetime-local" aria-label="Schedule post time" /><button class="button button-primary" data-schedule-content="${escapeHtml(item.id)}">Schedule post</button></div>` : '';
+  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${item.status === 'READY' ? 'ready' : ''}">${formatName(item.status)}</span></div>${reviewAction}${scheduleAction}<div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
 }
 
 function openContentDetail(id) {
@@ -128,7 +129,7 @@ async function load() {
   const [dashboard, content, settings, tiktok, notifications] = await Promise.all([
     request('/api/dashboard'), request('/api/content'), request('/api/settings'), request('/api/tiktok/status'), request('/api/notifications'),
   ]);
-  state.dashboard = dashboard; state.content = content.items; state.settings = settings;
+  state.dashboard = dashboard; state.content = content.items; state.settings = settings; state.tiktok = tiktok;
   renderDashboard(); renderStudio(); renderReview(); renderQueue(); renderSettings(settings); renderTikTok(tiktok);
   $('#notification-count').style.display = notifications.items.some((item) => !item.read_at) ? 'block' : 'none';
 }
@@ -148,9 +149,10 @@ function renderSettings(data) {
 
 function renderTikTok(data) {
   const connected = Boolean(data.account);
+  state.tiktok = data;
   $('#tiktok-name').textContent = data.account?.username ? `@${data.account.username}` : connected ? 'Connected' : 'Not connected';
   $('#tiktok-message').textContent = connected ? 'Account connected' : data.message;
-  $('#connect-tiktok').textContent = connected ? 'Manage account' : 'Connect TikTok';
+  $('#connect-tiktok').textContent = connected ? 'Disconnect TikTok' : 'Connect TikTok';
   $('.tiktok-card .status-dot').classList.toggle('muted', !connected);
 }
 
@@ -187,10 +189,25 @@ async function connectTikTok() {
   try { const data = await request('/api/tiktok/oauth/start', { method:'POST', body:'{}' }); window.location.href = data.url; } catch (error) { showToast('TikTok setup needs developer credentials first'); }
 }
 
+async function manageTikTok() {
+  if (!state.tiktok?.account) return connectTikTok();
+  if (!window.confirm('Disconnect the connected TikTok account?')) return;
+  try { await request('/api/tiktok/disconnect', { method:'POST', body:'{}' }); showToast('TikTok account disconnected'); await load(); } catch (error) { showToast(error.message); }
+}
+
 async function approveContent(id) {
   try {
     await request(`/api/content/${encodeURIComponent(id)}/status`, { method:'POST', body:JSON.stringify({ status:'READY' }) });
     closeContentDetail(); showToast('Content approved and ready to publish'); await load(); switchView('review');
+  } catch (error) { showToast(error.message); }
+}
+
+async function scheduleContent(button) {
+  const input = button.closest('.schedule-actions')?.querySelector('input');
+  if (!input?.value) { showToast('Choose a date and time first'); return; }
+  try {
+    await request('/api/schedule', { method:'POST', body:JSON.stringify({ content_id:button.dataset.scheduleContent, scheduled_at:new Date(input.value).toISOString(), timezone:Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' }) });
+    closeContentDetail(); showToast('Post added to the publishing queue'); await load(); switchView('calendar');
   } catch (error) { showToast(error.message); }
 }
 
@@ -200,9 +217,9 @@ $('#sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!$('.si
 ['#open-generate','#open-generate-secondary','#open-generate-studio','#open-generate-review','#open-generate-calendar'].forEach((selector) => $(selector)?.addEventListener('click', openModal));
 $('#close-generate').addEventListener('click', closeModal); $('#generate-modal').addEventListener('click', (event) => { if (event.target.id === 'generate-modal') closeModal(); });
 $('#close-content-detail').addEventListener('click', closeContentDetail); $('#content-detail-modal').addEventListener('click', (event) => { if (event.target.id === 'content-detail-modal') closeContentDetail(); });
-document.addEventListener('click', (event) => { const approval = event.target.closest('[data-approve-content]'); if (approval) { approveContent(approval.dataset.approveContent); return; } const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
+document.addEventListener('click', (event) => { const approval = event.target.closest('[data-approve-content]'); if (approval) { approveContent(approval.dataset.approveContent); return; } const schedule = event.target.closest('[data-schedule-content]'); if (schedule) { scheduleContent(schedule); return; } const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
 document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModal(); closeContentDetail(); } });
-$('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', connectTikTok);
+$('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', manageTikTok);
 $('#logout').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST', body:'{}' }); window.location.href = '/'; });
 initSidebar();
 handleTikTokResult();
