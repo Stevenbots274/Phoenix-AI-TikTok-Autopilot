@@ -485,6 +485,7 @@ def publish_content_for_user(user_id: str, content_id: str, scheduled_post_id: s
         content = db.execute(
             "SELECT * FROM content_plans WHERE id = ? AND user_id = ?", (content_id, user_id)
         ).fetchone()
+        settings = db.execute("SELECT approval_mode FROM content_settings WHERE id = 1").fetchone()
         account = db.execute(
             "SELECT * FROM tiktok_accounts WHERE user_id = ? AND status = 'CONNECTED' ORDER BY created_at DESC LIMIT 1",
             (user_id,),
@@ -495,8 +496,15 @@ def publish_content_for_user(user_id: str, content_id: str, scheduled_post_id: s
         ).fetchone()
     if not content:
         raise ValueError("Content not found")
+    if content["status"] == "WAITING_APPROVAL" and settings and settings["approval_mode"] == "automatic":
+        with connection() as db:
+            db.execute(
+                "UPDATE content_plans SET status = 'READY', updated_at = ? WHERE id = ? AND user_id = ?",
+                (now(), content_id, user_id),
+            )
+        content["status"] = "READY"
     if content["status"] not in ("READY", "SCHEDULED", "PUBLISHING"):
-        raise ValueError("Approve this content before publishing it")
+        raise ValueError("This post is waiting for approval. Approve it in Review queue or choose automatic publishing in Settings.")
     if existing:
         raise ValueError("This content has already been sent to TikTok")
     if not account:
@@ -1178,8 +1186,16 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not content:
                 raise ValueError("Content not found")
+            if content["status"] == "WAITING_APPROVAL":
+                settings = db.execute("SELECT approval_mode FROM content_settings WHERE id = 1").fetchone()
+                if settings and settings["approval_mode"] == "automatic":
+                    db.execute(
+                        "UPDATE content_plans SET status = 'READY', updated_at = ? WHERE id = ? AND user_id = ?",
+                        (now(), content_id, user["id"]),
+                    )
+                    content["status"] = "READY"
             if content["status"] not in ("READY", "SCHEDULED"):
-                raise ValueError("Approve this content before scheduling it")
+                raise ValueError("This post is waiting for approval. Approve it in Review queue or choose automatic publishing in Settings.")
             if db.execute(
                 "SELECT 1 FROM scheduled_posts WHERE content_id = ? AND status = 'SCHEDULED' LIMIT 1",
                 (content_id,),
@@ -1229,6 +1245,11 @@ class Handler(BaseHTTPRequestHandler):
                     f"UPDATE content_settings SET {assignments}, updated_at = ? WHERE id = 1",
                     [*present.values(), now()],
                 )
+            if present.get("approval_mode") == "automatic":
+                db.execute(
+                    "UPDATE content_plans SET status = 'READY', updated_at = ? WHERE user_id = ? AND status = 'WAITING_APPROVAL'",
+                    (now(), user["id"]),
+                )
             profile = self._profile_for_user(db, user)
             settings = db.execute("SELECT * FROM content_settings WHERE id = 1").fetchone()
         return {"profile": dict(profile), "settings": dict(settings)}
@@ -1241,6 +1262,11 @@ class Handler(BaseHTTPRequestHandler):
                 "UPDATE content_settings SET automation_enabled = ?, approval_mode = CASE WHEN ? = 1 THEN 'automatic' ELSE approval_mode END, updated_at = ? WHERE id = 1",
                 (int(enabled), int(enabled), now()),
             )
+            if enabled:
+                db.execute(
+                    "UPDATE content_plans SET status = 'READY', updated_at = ? WHERE user_id = ? AND status = 'WAITING_APPROVAL'",
+                    (now(), user["id"]),
+                )
             write_notification(
                 db,
                 "automation",
