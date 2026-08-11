@@ -296,6 +296,7 @@ class Handler(BaseHTTPRequestHandler):
                     ".css": "text/css; charset=utf-8",
                     ".js": "text/javascript; charset=utf-8",
                     ".svg": "image/svg+xml",
+                    ".txt": "text/plain; charset=utf-8",
                 }.get(candidate.suffix, "application/octet-stream")
                 body = candidate.read_bytes()
                 self.send_response(HTTPStatus.OK)
@@ -860,6 +861,7 @@ class Handler(BaseHTTPRequestHandler):
             ".css": "text/css; charset=utf-8",
             ".js": "text/javascript; charset=utf-8",
             ".svg": "image/svg+xml",
+            ".txt": "text/plain; charset=utf-8",
         }.get(candidate.suffix, "application/octet-stream")
         body = candidate.read_bytes()
         self.send_response(HTTPStatus.OK)
