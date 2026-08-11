@@ -285,6 +285,68 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as error:  # Keep the local server alive and expose a useful error.
             self._send_json({"error": str(error)}, HTTPStatus.INTERNAL_SERVER_ERROR, self.pending_headers)
 
+    def do_HEAD(self) -> None:
+        # TikTok's property verifier may probe with HEAD; serve headers only.
+        parsed = urlsplit(self.path)
+        if parsed.path == "/" or not parsed.path.startswith("/api/"):
+            candidate = self._static_candidate(parsed.path)
+            if candidate and candidate.is_file():
+                content_type = {
+                    ".html": "text/html; charset=utf-8",
+                    ".css": "text/css; charset=utf-8",
+                    ".js": "text/javascript; charset=utf-8",
+                    ".svg": "image/svg+xml",
+                }.get(candidate.suffix, "application/octet-stream")
+                body = candidate.read_bytes()
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+            else:
+                self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+        else:
+            self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
+
+    def _static_candidate(self, path: str) -> pathlib.Path | None:
+        legal_pages = {
+            "/terms": "terms.html",
+            "/terms/": "terms.html",
+            "/privacy": "privacy.html",
+            "/privacy/": "privacy.html",
+            "/about": "about.html",
+            "/about/": "about.html",
+            "/company": "about.html",
+            "/company/": "about.html",
+            "/help": "help.html",
+            "/help/": "help.html",
+            "/contact": "contact.html",
+            "/contact/": "contact.html",
+            "/support": "contact.html",
+            "/support/": "contact.html",
+            "/security": "security.html",
+            "/security/": "security.html",
+            "/cookies": "cookies.html",
+            "/cookies/": "cookies.html",
+            "/cookie-policy": "cookies.html",
+            "/cookie-policy/": "cookies.html",
+            "/app": "app.html",
+            "/app/": "app.html",
+            "/login": "auth.html",
+            "/login/": "auth.html",
+            "/signup": "auth.html",
+            "/signup/": "auth.html",
+        }
+        relative = legal_pages.get(path, "index.html" if path in ("", "/") else path.removeprefix("/"))
+        if relative.startswith("static/"):
+            relative = relative.removeprefix("static/")
+        candidate = (STATIC / relative).resolve()
+        if STATIC not in candidate.parents and candidate != STATIC:
+            return None
+        if not candidate.is_file():
+            return None
+        return candidate
+
     def do_POST(self) -> None:
         self.pending_headers = {}
         parsed = urlsplit(self.path)
@@ -789,42 +851,8 @@ class Handler(BaseHTTPRequestHandler):
         return {"read": True}
 
     def _serve_static(self, path: str) -> None:
-        legal_pages = {
-            "/terms": "terms.html",
-            "/terms/": "terms.html",
-            "/privacy": "privacy.html",
-            "/privacy/": "privacy.html",
-            "/about": "about.html",
-            "/about/": "about.html",
-            "/company": "about.html",
-            "/company/": "about.html",
-            "/help": "help.html",
-            "/help/": "help.html",
-            "/contact": "contact.html",
-            "/contact/": "contact.html",
-            "/support": "contact.html",
-            "/support/": "contact.html",
-            "/security": "security.html",
-            "/security/": "security.html",
-            "/cookies": "cookies.html",
-            "/cookies/": "cookies.html",
-            "/cookie-policy": "cookies.html",
-            "/cookie-policy/": "cookies.html",
-            "/app": "app.html",
-            "/app/": "app.html",
-            "/login": "auth.html",
-            "/login/": "auth.html",
-            "/signup": "auth.html",
-            "/signup/": "auth.html",
-        }
-        relative = legal_pages.get(path, "index.html" if path in ("", "/") else path.removeprefix("/"))
-        if relative.startswith("static/"):
-            relative = relative.removeprefix("static/")
-        candidate = (STATIC / relative).resolve()
-        if STATIC not in candidate.parents and candidate != STATIC:
-            self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
-            return
-        if not candidate.is_file():
+        candidate = self._static_candidate(path)
+        if candidate is None:
             self._send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
             return
         content_type = {
