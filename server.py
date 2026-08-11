@@ -605,6 +605,23 @@ def _maintain_user_autopilot(user_id: str, settings: HybridRow, work_limit: int)
     tz = _timezone(profile.get("timezone"))
     local_today = datetime.now(tz).date()
     work_done = 0
+    if automatic:
+        with connection() as db:
+            ready_rows = db.execute(
+                """SELECT c.id FROM content_plans c
+                   WHERE c.user_id = ? AND c.status = 'READY' AND c.automation_key IS NULL
+                     AND NOT EXISTS (
+                       SELECT 1 FROM scheduled_posts s
+                       WHERE s.content_id = c.id AND s.status IN ('SCHEDULED', 'PUBLISHING', 'PUBLISHED')
+                     )
+                   ORDER BY c.created_at LIMIT ?""",
+                (user_id, work_limit),
+            ).fetchall()
+        for row in ready_rows:
+            if work_done >= work_limit:
+                return work_done
+            _schedule_automation_content(user_id, row["id"], now(), str(profile["timezone"]))
+            work_done += 1
     for day_offset in range(AUTOPILOT_HORIZON_DAYS):
         target_date = local_today + timedelta(days=day_offset)
         for slot in range(posts_per_day):
@@ -1137,7 +1154,7 @@ class Handler(BaseHTTPRequestHandler):
         niche = str(body.get("niche", profile["niche"])).strip() or profile["niche"]
         requested_format = str(body.get("format", settings["default_format"])).upper()
         instructions = str(body.get("instructions", settings["permanent_instructions"]))
-        return create_content_plan_for_user(
+        result = create_content_plan_for_user(
             user["id"],
             topic=topic,
             niche=niche,
@@ -1146,6 +1163,19 @@ class Handler(BaseHTTPRequestHandler):
             instructions=instructions,
             research=bool(body.get("research")),
         )
+        if (
+            settings["automation_enabled"]
+            and settings["approval_mode"] == "automatic"
+            and result["item"]["status"] == "READY"
+        ):
+            _schedule_automation_content(user["id"], result["item"]["id"], now(), str(profile["timezone"]))
+            with connection() as db:
+                row = db.execute(
+                    "SELECT * FROM content_plans WHERE id = ? AND user_id = ?",
+                    (result["item"]["id"], user["id"]),
+                ).fetchone()
+            result["item"] = plan_payload(row)
+        return result
 
     def _update_status(self, content_id: str, body: dict) -> dict:
         user = self._require_user()
