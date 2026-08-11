@@ -13,7 +13,8 @@
       <aside class="sidebar">
         <div class="brand">
           <img class="brand-mark-image" src="/static/assets/phoenix-mark.svg" alt="Phoenix" />
-          <div><strong>Phoenix</strong><span>Autopilot</span></div>
+          <div class="brand-copy"><strong>Phoenix</strong><span>Autopilot</span></div>
+          <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Collapse sidebar" aria-expanded="true"><span aria-hidden="true">‹</span></button>
         </div>
         <div class="eyebrow nav-label">Workspace</div>
         <nav class="nav-list" aria-label="Main navigation">
@@ -69,6 +70,7 @@
     </div>
 
     <div class="modal-backdrop hidden" id="generate-modal"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title"><button class="modal-close" id="close-generate" aria-label="Close">×</button><div class="eyebrow">New content plan</div><h2 id="modal-title">What should Phoenix explore?</h2><p>Leave the topic blank to let the content director choose a fresh angle.</p><form id="generate-form"><label>Topic or idea<input name="topic" placeholder="e.g. 3 AI workflows saving creators time" /></label><label>Niche<input name="niche" value="AI & technology" /></label><div class="form-row"><label>Format<select name="format"><option value="AUTO">Let Phoenix choose</option><option value="VOICE_VIDEO">Voice video</option><option value="MUSIC_VIDEO">Music video</option><option value="SLIDESHOW">Slideshow</option><option value="SILENT_VIDEO">Silent video</option><option value="VOICE_MUSIC">Voice + music</option></select></label><label>Duration<select name="duration_seconds"><option value="25">25 sec</option><option value="35" selected>35 sec</option><option value="50">50 sec</option></select></label></div><label class="check-label"><input type="checkbox" name="research" /> Research this topic for fresh sources</label><button class="button button-primary button-wide" type="submit"><span id="generate-label">Generate content plan</span><span class="spinner hidden" id="generate-spinner"></span></button></form></div></div>
+    <div class="modal-backdrop hidden" id="content-detail-modal"><div class="content-detail-modal" role="dialog" aria-modal="true" aria-labelledby="content-detail-title"><button class="modal-close" id="close-content-detail" aria-label="Close">×</button><div id="content-detail-body"></div></div></div>
     <div class="toast hidden" id="toast"></div>
     <script src="/static/app.js"></script>
   </body>

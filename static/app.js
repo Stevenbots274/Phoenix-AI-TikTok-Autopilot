@@ -22,12 +22,55 @@ function showToast(message) {
   window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(() => toast.classList.add('hidden'), 3200);
 }
 
+function setSidebarCollapsed(collapsed) {
+  const sidebar = $('.sidebar'); const toggle = $('#sidebar-toggle');
+  sidebar.classList.toggle('collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', String(!collapsed));
+  toggle.setAttribute('aria-label', collapsed ? 'Expand sidebar' : 'Collapse sidebar');
+  toggle.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+  toggle.querySelector('span').textContent = collapsed ? '›' : '‹';
+  localStorage.setItem('phoenix.sidebarCollapsed', String(collapsed));
+}
+
+function initSidebar() {
+  const saved = localStorage.getItem('phoenix.sidebarCollapsed');
+  const collapsed = saved === null ? window.matchMedia('(max-width: 650px)').matches : saved === 'true';
+  setSidebarCollapsed(collapsed);
+}
+
 function contentCard(item) {
   const ready = ['READY', 'WAITING_APPROVAL'].includes(item.status);
-  return `<article class="content-card"><div class="content-card-top"><span class="format-label">${formatName(item.format)}</span><span class="content-status ${ready ? 'ready' : ''}">${formatName(item.status)}</span></div><h3>${escapeHtml(item.topic)}</h3><p>${escapeHtml(item.hook)}</p><div class="content-footer"><span>${formatDate(item.created_at)}</span><span>${item.duration_seconds}s</span></div></article>`;
+  return `<article class="content-card"><div class="content-card-top"><span class="format-label">${formatName(item.format)}</span><span class="content-status ${ready ? 'ready' : ''}">${formatName(item.status)}</span></div><h3>${escapeHtml(item.topic)}</h3><p>${escapeHtml(item.hook)}</p><div class="content-footer"><span>${formatDate(item.created_at)}</span><span>${item.duration_seconds}s</span></div><button class="content-card-open" type="button" data-content-id="${escapeHtml(item.id)}">Read full plan <span>→</span></button></article>`;
 }
 
 function escapeHtml(value) { return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char])); }
+
+function safeUrl(value) {
+  try {
+    const url = new URL(value);
+    return ['http:', 'https:'].includes(url.protocol) ? url.href : '#';
+  } catch (error) { return '#'; }
+}
+
+function detailList(items, emptyMessage) {
+  return items?.length ? `<ul class="detail-list">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join('')}</ul>` : `<p class="detail-empty">${emptyMessage}</p>`;
+}
+
+function contentDetail(item) {
+  const sources = item.sources || [];
+  const sourceMarkup = sources.length ? `<div class="detail-sources">${sources.map((source) => `<a href="${escapeHtml(safeUrl(source.url))}" target="_blank" rel="noopener noreferrer"><span>${escapeHtml(source.provider || 'Source')}</span><strong>${escapeHtml(source.title || source.url)}</strong></a>`).join('')}</div>` : '<p class="detail-empty">No research sources were attached to this plan.</p>';
+  return `<div class="content-detail-heading"><div><div class="eyebrow">${formatName(item.format)} · ${item.duration_seconds}s</div><h2 id="content-detail-title">${escapeHtml(item.topic)}</h2></div><span class="content-status ${['READY', 'WAITING_APPROVAL'].includes(item.status) ? 'ready' : ''}">${formatName(item.status)}</span></div><div class="detail-section"><h3>Hook</h3><p class="detail-copy">${escapeHtml(item.hook)}</p></div><div class="detail-section"><h3>Script</h3><p class="detail-copy detail-script">${escapeHtml(item.script)}</p></div><div class="detail-section"><h3>Caption</h3><p class="detail-copy">${escapeHtml(item.caption)}</p></div><div class="detail-columns"><div class="detail-section"><h3>Hashtags</h3><div class="hashtag-list">${(item.hashtags || []).map((tag) => `<span>${escapeHtml(tag)}</span>`).join('') || '<p class="detail-empty">No hashtags added.</p>'}</div></div><div class="detail-section"><h3>Visual direction</h3>${detailList(item.visual_instructions, 'No visual direction was added.')}</div></div><div class="detail-section"><h3>Research sources</h3>${sourceMarkup}</div>`;
+}
+
+function openContentDetail(id) {
+  const item = state.content.find((content) => content.id === id) || state.dashboard?.recent.find((content) => content.id === id);
+  if (!item) return;
+  $('#content-detail-body').innerHTML = contentDetail(item);
+  $('#content-detail-modal').classList.remove('hidden');
+  $('#close-content-detail').focus();
+}
+
+function closeContentDetail() { $('#content-detail-modal').classList.add('hidden'); }
 
 function renderDashboard() {
   const dashboard = state.dashboard; if (!dashboard) return;
@@ -128,9 +171,14 @@ async function connectTikTok() {
 
 $$('.nav-item').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
 $$('[data-view]').forEach((button) => button.addEventListener('click', () => switchView(button.dataset.view)));
+$('#sidebar-toggle').addEventListener('click', () => setSidebarCollapsed(!$('.sidebar').classList.contains('collapsed')));
 ['#open-generate','#open-generate-secondary','#open-generate-studio','#open-generate-calendar'].forEach((selector) => $(selector)?.addEventListener('click', openModal));
 $('#close-generate').addEventListener('click', closeModal); $('#generate-modal').addEventListener('click', (event) => { if (event.target.id === 'generate-modal') closeModal(); });
+$('#close-content-detail').addEventListener('click', closeContentDetail); $('#content-detail-modal').addEventListener('click', (event) => { if (event.target.id === 'content-detail-modal') closeContentDetail(); });
+document.addEventListener('click', (event) => { const trigger = event.target.closest('[data-content-id]'); if (trigger) openContentDetail(trigger.dataset.contentId); });
+document.addEventListener('keydown', (event) => { if (event.key === 'Escape') { closeModal(); closeContentDetail(); } });
 $('#generate-form').addEventListener('submit', generate); $('#save-settings').addEventListener('click', saveSettings); $('#automation-toggle').addEventListener('change', toggleAutomation); $('#connect-tiktok').addEventListener('click', connectTikTok);
 $('#logout').addEventListener('click', async () => { await request('/api/auth/logout', { method:'POST', body:'{}' }); window.location.href = '/'; });
+initSidebar();
 $('#today').textContent = new Date().toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
 load().catch((error) => { if (error.message === 'Sign in is required') window.location.href = '/login'; else showToast(error.message); });
