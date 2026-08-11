@@ -1101,25 +1101,42 @@ class Handler(BaseHTTPRequestHandler):
             return {"error": query.get("error", ["TikTok authorization was cancelled"])[0]}
         token_data = TikTokClient().exchange_code(code)
         timestamp = now()
+        open_id = token_data.get("open_id")
+        values = (
+            user_id,
+            open_id,
+            token_data.get("access_token"),
+            token_data.get("refresh_token"),
+            _expiry_from_seconds(token_data.get("expires_in")),
+            _expiry_from_seconds(token_data.get("refresh_expires_in")),
+            json.dumps(token_data.get("scope", "").split()),
+            timestamp,
+        )
         with connection() as db:
-            db.execute(
-                """INSERT INTO tiktok_accounts
-                   (id, user_id, open_id, access_token, refresh_token, expires_at, refresh_expires_at,
-                    scopes, status, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONNECTED', ?, ?)""",
-                (
-                    str(uuid.uuid4()),
-                    user_id,
-                    token_data.get("open_id"),
-                    token_data.get("access_token"),
-                    token_data.get("refresh_token"),
-                    _expiry_from_seconds(token_data.get("expires_in")),
-                    _expiry_from_seconds(token_data.get("refresh_expires_in")),
-                    json.dumps(token_data.get("scope", "").split()),
-                    timestamp,
-                    timestamp,
-                ),
-            )
+            existing_by_open_id = db.execute(
+                "SELECT id, user_id FROM tiktok_accounts WHERE open_id = ? LIMIT 1", (open_id,)
+            ).fetchone() if open_id else None
+            if existing_by_open_id and existing_by_open_id["user_id"] != user_id:
+                raise TikTokConfigurationError("This TikTok account is already linked to another Phoenix workspace.")
+            existing = existing_by_open_id or db.execute(
+                "SELECT id, user_id FROM tiktok_accounts WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if existing:
+                db.execute(
+                    """UPDATE tiktok_accounts SET user_id = ?, open_id = ?, access_token = ?, refresh_token = ?,
+                       expires_at = ?, refresh_expires_at = ?, scopes = ?, status = 'CONNECTED', updated_at = ?
+                       WHERE id = ?""",
+                    (*values, existing["id"]),
+                )
+            else:
+                db.execute(
+                    """INSERT INTO tiktok_accounts
+                       (id, user_id, open_id, access_token, refresh_token, expires_at, refresh_expires_at,
+                        scopes, status, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'CONNECTED', ?, ?)""",
+                    (str(uuid.uuid4()), *values, timestamp),
+                )
         return {"connected": True}
 
     def _disconnect_tiktok(self) -> dict:
